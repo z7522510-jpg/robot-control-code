@@ -37,6 +37,24 @@ class DobotDemo:
         print("使能成功")
 
         # 启动状态反馈线程
+        speed_ratio = 20
+        speed_commands = [
+            ("SpeedFactor", self.dashboard.SpeedFactor(speed_ratio)),
+            ("VelJ", self.dashboard.VelJ(speed_ratio)),
+            ("AccJ", self.dashboard.AccJ(speed_ratio)),
+        ]
+        for name, result in speed_commands:
+            print(f"{name}:", result)
+            if self.parseResultId(result)[0] != 0:
+                print(f"{name} set failed, stop demo")
+                return
+        print("Speed set to", speed_ratio, "%")
+
+        confirm = input("Input 1 to start motion, other input to exit: ").strip()
+        if confirm != "1":
+            print("Motion canceled")
+            return
+
         feed_thread = threading.Thread(
             target=self.GetFeed)  # 机器状态反馈线程
         feed_thread.daemon = True
