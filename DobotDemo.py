@@ -2,7 +2,6 @@ from dobot_api import DobotApiFeedBack,DobotApiDashboard
 import threading
 from time import sleep
 import re
-import math
 
 class DobotDemo:
     def __init__(self, ip):
@@ -45,17 +44,18 @@ class DobotDemo:
         sleep(1)
 
         center = self.GetCurrentPose()
-        circle_points = self.GenerateXZCirclePoints(center, radius=50, point_count=36)
+        radius = 100  # 10 cm = 100 mm
+        circle_points = self.GenerateXZArcPoints(center, radius)
 
         print("圆心:", center)
-        print("半径: 50 mm")
-        print("XZ 圆最低 Z:", center[2] - 50, "最高 Z:", center[2] + 50)
+        print("半径:", radius, "mm")
+        print("XZ 圆最低 Z:", center[2] - radius, "最高 Z:", center[2] + radius)
 
-        # 先从圆心移动到圆周起点，再沿 XZ 平面走一圈并回到起点闭合圆
-        self.RunPoint(circle_points[0])
-        for point in circle_points[1:]:
-            self.RunPoint(point)
-        self.RunPoint(circle_points[0])
+        # 先从圆心移动到圆周起点，再用两段圆弧在 XZ 平面闭合成圆
+        start_point, top_point, left_point, bottom_point = circle_points
+        self.RunPoint(start_point)
+        self.RunArc(top_point, left_point)
+        self.RunArc(bottom_point, start_point)
 
     def GetFeed(self):
         # 获取机器人状态
@@ -81,6 +81,15 @@ class DobotDemo:
         # 走点指令
         recvmovemess = self.dashboard.MovJ(*point_list, 0)
         print("MovJ:", recvmovemess)
+        self.WaitCommandDone(recvmovemess)
+
+    def RunArc(self, mid_point, end_point):
+        # 圆弧指令：从当前位置出发，经过 mid_point，到达 end_point
+        recvmovemess = self.dashboard.Arc(*mid_point, *end_point, 0)
+        print("Arc:", recvmovemess)
+        self.WaitCommandDone(recvmovemess)
+
+    def WaitCommandDone(self, recvmovemess):
         print(self.parseResultId(recvmovemess))
         currentCommandID = self.parseResultId(recvmovemess)[1]
         print("指令 ID:", currentCommandID)
@@ -92,6 +101,14 @@ class DobotDemo:
                 print("运动结束")
                 break
             sleep(0.1)
+
+    def GenerateXZArcPoints(self, center, radius=100):
+        return [
+            [center[0] + radius, center[1], center[2], center[3], center[4], center[5]],
+            [center[0], center[1], center[2] + radius, center[3], center[4], center[5]],
+            [center[0] - radius, center[1], center[2], center[3], center[4], center[5]],
+            [center[0], center[1], center[2] - radius, center[3], center[4], center[5]],
+        ]
 
     def GenerateXZCirclePoints(self, center, radius=50, point_count=36):
         points = []
