@@ -5,12 +5,11 @@ from time import sleep
 import config
 from hardware import (
     connect_robot,
-    enable_robot,
     has_robot_error,
     move_linear_point,
+    prepare_robot,
     return_to_pose,
     send_do_pulse,
-    set_robot_speed,
     start_feedback,
 )
 
@@ -38,6 +37,12 @@ def calculate_step_count():
     if abs(total_distance - config.TOTAL_DISTANCE_MM) > 1e-9:
         raise ValueError("TOTAL_DISTANCE_MM must be divisible by STEP_DISTANCE_MM")
     return step_count
+
+
+def build_step_target(start_pose, step_index):
+    target_pose = start_pose.copy()
+    target_pose[1] = start_pose[1] - config.STEP_DISTANCE_MM * step_index
+    return target_pose
 
 
 def send_trigger_pulse(dobot, loop_index, step_index, loop_start_time, do_records):
@@ -82,10 +87,7 @@ def print_records(do_records):
 def run_experiment(require_confirm=True):
     dobot = connect_robot(config.DOBOT_IP)
 
-    if not enable_robot(dobot):
-        return []
-
-    if not set_robot_speed(dobot, config.SPEED_RATIO):
+    if not prepare_robot(dobot, config.SPEED_RATIO):
         return []
 
     if require_confirm:
@@ -135,8 +137,7 @@ def run_experiment(require_confirm=True):
 
                 send_trigger_pulse(dobot, loop_index, step_index, loop_start_time, do_records)
 
-                target_pose = start_pose.copy()
-                target_pose[1] = start_pose[1] - config.STEP_DISTANCE_MM * step_index
+                target_pose = build_step_target(start_pose, step_index)
 
                 move_start_ms = elapsed_ms(loop_start_time)
                 print(

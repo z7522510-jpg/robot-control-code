@@ -28,6 +28,15 @@ def has_robot_error(dobot):
     return True
 
 
+def command_succeeded(dobot, command_name, result):
+    print(f"{command_name}:", result)
+    result_ids = dobot.parseResultId(result)
+    if not result_ids or result_ids[0] != 0:
+        print(f"{command_name} failed")
+        return False
+    return True
+
+
 def enable_robot(dobot):
     print("Checking robot error information before enable...")
     if has_robot_error(dobot):
@@ -35,8 +44,7 @@ def enable_robot(dobot):
         return False
 
     enable_result = dobot.dashboard.EnableRobot()
-    print("EnableRobot:", enable_result)
-    if dobot.parseResultId(enable_result)[0] != 0:
+    if not command_succeeded(dobot, "EnableRobot", enable_result):
         print("Enable failed: check TCP/IP mode, alarms, E-stop, and port 29999 connection")
         has_robot_error(dobot)
         return False
@@ -46,18 +54,25 @@ def enable_robot(dobot):
 
 
 def set_robot_speed(dobot, speed_ratio):
-    speed_commands = [
-        ("SpeedFactor", dobot.dashboard.SpeedFactor(speed_ratio)),
-        ("VelJ", dobot.dashboard.VelJ(speed_ratio)),
-        ("AccJ", dobot.dashboard.AccJ(speed_ratio)),
-    ]
-    for name, result in speed_commands:
-        print(f"{name}:", result)
-        if dobot.parseResultId(result)[0] != 0:
+    speed_commands = (
+        ("SpeedFactor", lambda: dobot.dashboard.SpeedFactor(speed_ratio)),
+        ("VelJ", lambda: dobot.dashboard.VelJ(speed_ratio)),
+        ("AccJ", lambda: dobot.dashboard.AccJ(speed_ratio)),
+    )
+    for name, send_command in speed_commands:
+        if not command_succeeded(dobot, name, send_command()):
             print(f"{name} set failed, stop experiment")
             return False
 
     print("Speed set to", speed_ratio, "%")
+    return True
+
+
+def prepare_robot(dobot, speed_ratio):
+    if not enable_robot(dobot):
+        return False
+    if not set_robot_speed(dobot, speed_ratio):
+        return False
     return True
 
 
@@ -73,26 +88,36 @@ def move_linear_point(dobot, point, speed_ratio):
     print("MovL:", move_result)
     if not dobot.WaitCommandDone(move_result):
         raise RuntimeError("MovL failed or timed out")
+    return True
+
+
+def set_digital_output(dobot, do_index, value):
+    result = dobot.dashboard.DO(do_index, value)
+    print(f"DO({do_index},{value}):", result)
+    return result
 
 
 def send_do_pulse(dobot, do_index, pulse_seconds):
-    do_on_result = dobot.dashboard.DO(do_index, 1)
+    do_on_result = set_digital_output(dobot, do_index, 1)
     sleep(pulse_seconds)
-    do_off_result = dobot.dashboard.DO(do_index, 0)
+    do_off_result = set_digital_output(dobot, do_index, 0)
     return do_on_result, do_off_result
 
 
 def turn_do_off(dobot, do_index):
-    result = dobot.dashboard.DO(do_index, 0)
-    print(f"DO({do_index},0):", result)
+    return set_digital_output(dobot, do_index, 0)
+
+
+def stop_robot(dobot):
+    result = dobot.dashboard.Stop()
+    print("Stop:", result)
     return result
 
 
 def return_to_pose(dobot, saved_pose, speed_ratio, do_indexes=None):
     print("Returning to saved start pose:", saved_pose)
     try:
-        stop_result = dobot.dashboard.Stop()
-        print("Stop:", stop_result)
+        stop_robot(dobot)
         sleep(0.2)
     except Exception as error:
         print("Stop failed:", error)
