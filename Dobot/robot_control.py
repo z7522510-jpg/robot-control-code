@@ -1,7 +1,7 @@
 import threading
 from time import sleep
 
-from Dobot import Dobot
+from .dobot import Dobot
 
 
 def connect_robot(ip):
