@@ -4,6 +4,7 @@ except ImportError:
     from dobot_api import DobotApiFeedBack, DobotApiDashboard
 import threading
 from time import sleep
+import time
 import math
 import re
 
@@ -67,17 +68,42 @@ class Dobot:
         if wait:
             self.WaitCommandDone(recvmovemess)
 
-    def WaitCommandDone(self, recvmovemess):
-        print(self.parseResultId(recvmovemess))
-        currentCommandID = self.parseResultId(recvmovemess)[1]
-        print("指令 ID:", currentCommandID)
-        #sleep(0.02)
-        while True:  #完成判断循环
+    def WaitCommandDone(self, recvmovemess, timeout=30):
+        result_ids = self.parseResultId(recvmovemess)
+        print(result_ids)
+        if len(result_ids) < 2 or result_ids[0] != 0:
+            print("指令下发失败，跳过等待:", recvmovemess)
+            return False
 
-            print(self.feedData.robotMode)
-            if self.feedData.robotMode == 5 and self.feedData.robotCurrentCommandID == currentCommandID:
+        currentCommandID = result_ids[1]
+        print("指令 ID:", currentCommandID)
+        start_time = time.perf_counter()
+        last_print_time = start_time
+
+        while True:
+            now = time.perf_counter()
+            if self.feedData.robotMode == 5 and self.feedData.robotCurrentCommandID >= currentCommandID:
                 print("运动结束")
-                break
+                return True
+
+            if now - last_print_time >= 1:
+                print(
+                    "等待运动完成: "
+                    f"mode={self.feedData.robotMode}, "
+                    f"currentCommandID={self.feedData.robotCurrentCommandID}, "
+                    f"targetCommandID={currentCommandID}"
+                )
+                last_print_time = now
+
+            if now - start_time >= timeout:
+                print(
+                    "等待运动完成超时: "
+                    f"mode={self.feedData.robotMode}, "
+                    f"currentCommandID={self.feedData.robotCurrentCommandID}, "
+                    f"targetCommandID={currentCommandID}"
+                )
+                return False
+
             sleep(0.1)
 
     def GenerateXZArcPoints(self, center, radius=100):
