@@ -1,14 +1,19 @@
-from dobot_api import DobotApiFeedBack,DobotApiDashboard
+try:
+    from .dobot_api import DobotApiFeedBack, DobotApiDashboard
+except ImportError:
+    from dobot_api import DobotApiFeedBack, DobotApiDashboard
 import threading
 from time import sleep
+import math
 import re
 
-class DobotDemo:
+class Dobot:
     def __init__(self, ip):
         self.ip = ip
         self.dashboardPort = 29999
         self.feedPortFour = 30004
         self.dashboard = None
+        self.feedFour = None
         self.feedInfo = []
         self.__globalLockValue = threading.Lock()
         
@@ -24,56 +29,9 @@ class DobotDemo:
 
         self.feedData = item()  # 定义结构对象
 
-    def start(self):
-        # 启动机器人并使能
+    def connect(self):
         self.dashboard = DobotApiDashboard(self.ip, self.dashboardPort)
         self.feedFour = DobotApiFeedBack(self.ip, self.feedPortFour)
-        enable_result = self.dashboard.EnableRobot()
-        print("EnableRobot:", enable_result)
-        if self.parseResultId(enable_result)[0] != 0:
-            print("使能失败: 请检查机器人是否在 TCP/IP 模式、是否有报警/急停、以及 29999 端口连接")
-            return
-        print("使能成功")
-
-        # 启动状态反馈线程
-        speed_ratio = 20
-        speed_commands = [
-            ("SpeedFactor", self.dashboard.SpeedFactor(speed_ratio)),
-            ("VelJ", self.dashboard.VelJ(speed_ratio)),
-            ("AccJ", self.dashboard.AccJ(speed_ratio)),
-        ]
-        for name, result in speed_commands:
-            print(f"{name}:", result)
-            if self.parseResultId(result)[0] != 0:
-                print(f"{name} set failed, stop demo")
-                return
-        print("Speed set to", speed_ratio, "%")
-
-        confirm = input("Input 1 to start motion, other input to exit: ").strip()
-        if confirm != "1":
-            print("Motion canceled")
-            return
-
-        feed_thread = threading.Thread(
-            target=self.GetFeed)  # 机器状态反馈线程
-        feed_thread.daemon = True
-        feed_thread.start()
-
-        sleep(1)
-
-        center = self.GetCurrentPose()
-        radius = 100  # 10 cm = 100 mm
-        circle_points = self.GenerateXZArcPoints(center, radius)
-
-        print("圆心:", center)
-        print("半径:", radius, "mm")
-        print("XZ 圆最低 Z:", center[2] - radius, "最高 Z:", center[2] + radius)
-
-        # 先从圆心移动到圆周起点，再用两段圆弧在 XZ 平面闭合成圆
-        start_point, top_point, left_point, bottom_point = circle_points
-        self.RunPoint(start_point)
-        self.RunArc(top_point, left_point)
-        self.RunArc(bottom_point, start_point)
 
     def GetFeed(self):
         # 获取机器人状态
@@ -95,17 +53,19 @@ class DobotDemo:
                         self.feedData.TimeStamp = int(feedInfo['TimeStamp'][0])
                         '''
 
-    def RunPoint(self, point_list):
+    def RunPoint(self, point_list, cp=-1, wait=True):
         # 走点指令
-        recvmovemess = self.dashboard.MovJ(*point_list, 0)
+        recvmovemess = self.dashboard.MovJ(*point_list, 0, cp=cp)
         print("MovJ:", recvmovemess)
-        self.WaitCommandDone(recvmovemess)
+        if wait:
+            self.WaitCommandDone(recvmovemess)
 
-    def RunArc(self, mid_point, end_point):
+    def RunArc(self, mid_point, end_point, cp=-1, wait=True):
         # 圆弧指令：从当前位置出发，经过 mid_point，到达 end_point
-        recvmovemess = self.dashboard.Arc(*mid_point, *end_point, 0)
+        recvmovemess = self.dashboard.Arc(*mid_point, *end_point, 0, cp=cp)
         print("Arc:", recvmovemess)
-        self.WaitCommandDone(recvmovemess)
+        if wait:
+            self.WaitCommandDone(recvmovemess)
 
     def WaitCommandDone(self, recvmovemess):
         print(self.parseResultId(recvmovemess))
