@@ -1,0 +1,23 @@
+Device: UCP         Date: 2016.07.20
+Name;ID;Reg ID;Menu;Type;User rights;Nonvolatile;Min value;Max value;Short name;Print format;Name;Value
+NL30x   ;$8;$19;$2;u16;AS;;1;30000;Pack;%u;Burst length, pulses;1
+NL30x   ;$8;$13;$11;u8;AUS;NV;0;1;SyncM;[INTERNAL,EXTERNAL];Sync mode;INTERNAL
+NL30x   ;$8;$16;$11;s32;AUS;NV;-64000;64000;SyncOut;%d;SyncOut delay;0
+NL30x   ;$8;$1A;$11;u8;AUS;NV;1;99;FDivider;%u;Divider, every Nth pulse;1
+NL30x   ;$8;$20;$22;u16;AS;NV;100;500;CoolT;%.1fC;Set cooling temperature;27.0
+NL30x   ;$8;$1B;$32;u16;AS;NV;800;8000;EO1;%u;Best EO delay;1700
+NL30x   ;$8;$1C;$32;u16;AS;NV;800;8000;EO2;%u;Adjustment EO delay;3200
+NL30x   ;$8;$10;$0;u8;AUS;NV;0;2;State;[SLEEP,STOP,RUN,FAULT];State;STOP
+NL30x   ;$8;$11;$1;u8;AUS;;0;2;Energy;[OFF,Adjustment,Max];Output level;OFF
+NL30x   ;$8;$18;$2;u8;AS;;0;2;BatchM;[Continuous,Burst,Trigger];Continuous / Burst mode / Trigger burst;Continuous
+NL30x   ;$8;$23;$22;u16;ArUrSr;;0;500;Temp;%.1fC;Read cooling temperature;26.4
+NL30x   ;$8;$21;$22;u32;AUrS;NV;0;4294967295;PulseCNT;%u;Lamp pulse counter;663308
+HV40W   ;$28;$12;$3;u16;ArUrSr;;0;4000;HV;%uV;HV voltage;3398
+NL30x   ;$8;$22;$22;u16;ArUrSr;;0;1000;Pump;%.1f%;Pump voltage;87.0
+NL30x   ;$8;$15;$32;u8;AS;NV;1;50;RepRate;%uHz;Repetition Rate;20
+MaxiOPG ;$1F;$60;$51;float;ArUrSr;;0;450;;%4.0f mJ;Pump; 344
+MaxiOPG ;$1F;$11;$1;u8;ArUrSr;;0;3;;[Off,Initiation,Tuning...,Ok.];Status;Ok.
+MaxiOPG ;$1F;$10;$0;float;AUS;NV;1;2600;;%.7gnm;WaveLength;500
+MaxiOPG ;$1F;$25;$31;float;AUS;;0;330;;%0.3f;ATTN. RotH 1.8°/64 600mA.;0.000
+MaxiOPG ;$1F;$13;$3;u8;AUS;NV;0;3;;[SH_FC,SH_Air,FC,Air];Configuration;FC
+__license:2fe9c95ed179efc58b62ed099450d030

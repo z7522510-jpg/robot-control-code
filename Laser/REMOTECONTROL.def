@@ -1,0 +1,26 @@
+LIBRARY     REMOTECONTROL.DLL
+
+EXPORTS
+    ___CPPdebugHook                @23  ; ___CPPdebugHook
+    rcConnect                      @1   ; rcConnect
+    rcDisconnect                   @2   ; rcDisconnect
+    rcGetFirstDeviceName           @3   ; rcGetFirstDeviceName
+    rcGetFirstRegisterName         @5   ; rcGetFirstRegisterName
+    rcGetNextDeviceName            @4   ; rcGetNextDeviceName
+    rcGetNextRegisterName          @6   ; rcGetNextRegisterName
+    rcGetRegAsDouble               @11  ; rcGetRegAsDouble
+    rcGetRegAsString               @15  ; rcGetRegAsString
+    rcGetRegFirstEnumValue         @9   ; rcGetRegFirstEnumValue
+    rcGetRegFromLogAsDouble        @21  ; rcGetRegFromLogAsDouble
+    rcGetRegFromLogAsString        @22  ; rcGetRegFromLogAsString
+    rcGetRegNextEnumValue          @10  ; rcGetRegNextEnumValue
+    rcIsRegisterNV                 @8   ; rcIsRegisterNV
+    rcIsRegisterWriteable          @7   ; rcIsRegisterWriteable
+    rcLogRegStart                  @19  ; rcLogRegStart
+    rcLogRegStop                   @20  ; rcLogRegStop
+    rcSetRegFromDouble             @12  ; rcSetRegFromDouble
+    rcSetRegFromDoubleA            @13  ; rcSetRegFromDoubleA
+    rcSetRegFromString             @16  ; rcSetRegFromString
+    rcSetRegFromStringA            @17  ; rcSetRegFromStringA
+    rcSetRegNVFromDouble           @14  ; rcSetRegNVFromDouble
+    rcSetRegNVFromString           @18  ; rcSetRegNVFromString
