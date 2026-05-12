@@ -24,17 +24,12 @@ class Laser:
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
 
-    def _require_ok(self, err, message):
-        if err != 0:
-            raise RuntimeError(f"{message}, error code: {err}")
-
     def connect(self):
         if self.connected:
             print("Laser already connected")
             return
 
-        err = self.api.connect()
-        self._require_ok(err, "Laser connection failed")
+        self.api.connect()
         self.connected = True
         print("Laser connected")
 
@@ -61,36 +56,18 @@ class Laser:
         except Exception as error:
             print("Laser stop failed:", error)
 
-    def _set_nv_string(self, device, regname, value):
-        err = self.api.set_reg_nv_string(device, regname, value)
-        self._require_ok(err, f"Failed to set {regname} = {value}")
-
-    def _set_string(self, device, regname, value):
-        err = self.api.set_reg_string(device, regname, value)
-        self._require_ok(err, f"Failed to set {regname} = {value}")
-
-    def _set_double(self, device, regname, value):
-        err = self.api.set_reg_double(device, regname, value)
-        self._require_ok(err, f"Failed to set {regname} = {value}")
-
-    def _set_nv_double(self, device, regname, value):
-        err = self.api.set_reg_nv_double(device, regname, value)
-        self._require_ok(err, f"Failed to set {regname} = {value}")
-
     def get_string(self, device, regname, timeout_ms=2000):
-        err, value = self.api.get_reg_string(device, regname, timeout_ms)
-        self._require_ok(err, f"Failed to read {regname}")
-        return value
+        return self.api.get_string(device, regname, timeout_ms)
 
     def configure_laser(self, firemode, syncmode, sync_delay, wavelength):
-        self._set_nv_string(self.dev_nl30x, "Sync mode", syncmode)
-        self._set_string(self.dev_nl30x, "Continuous / Burst mode / Trigger burst", firemode)
-        self._set_string(self.dev_nl30x, "SyncOut delay", sync_delay)
-        self._set_nv_string(self.dev_maxiopg, "Configuration", "Air")
+        self.api.set_nv_string(self.dev_nl30x, "Sync mode", syncmode)
+        self.api.set_string(self.dev_nl30x, "Continuous / Burst mode / Trigger burst", firemode)
+        self.api.set_string(self.dev_nl30x, "SyncOut delay", sync_delay)
+        self.api.set_nv_string(self.dev_maxiopg, "Configuration", "Air")
         self.set_wavelength(wavelength)
 
         time.sleep(0.1)
-        self._set_double(self.dev_maxiopg, ATTENUATOR_REGISTER, 272)
+        self.api.set_double(self.dev_maxiopg, ATTENUATOR_REGISTER, 272)
 
     def warm_up(self, seconds=10):
         self.run()
@@ -111,24 +88,24 @@ class Laser:
         print("Laser initialization complete")
 
     def set_sync_delay(self, time_val):
-        self._set_string(self.dev_nl30x, "SyncOut delay", str(time_val))
+        self.api.set_string(self.dev_nl30x, "SyncOut delay", str(time_val))
 
     def set_burst_count(self, burst_count):
         if not self.initialized:
             raise RuntimeError("Please initialize the laser first")
 
         self.burst_count = burst_count
-        self._set_string(self.dev_nl30x, "Burst length, pulses", str(burst_count))
+        self.api.set_string(self.dev_nl30x, "Burst length, pulses", str(burst_count))
         print(f"Laser burst count set to {burst_count}")
 
     def run(self):
-        self._set_string(self.dev_nl30x, "State", "RUN")
+        self.api.set_string(self.dev_nl30x, "State", "RUN")
 
     def stop(self):
-        self._set_string(self.dev_nl30x, "State", "STOP")
+        self.api.set_string(self.dev_nl30x, "State", "STOP")
 
     def set_wavelength(self, wavelength):
-        self._set_nv_double(self.dev_maxiopg, "WaveLength", wavelength)
+        self.api.set_nv_double(self.dev_maxiopg, "WaveLength", wavelength)
         print(f"Laser wavelength set to {wavelength} nm")
 
     def setwavelength(self, wavelength):

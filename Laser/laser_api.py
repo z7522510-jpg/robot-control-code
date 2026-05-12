@@ -11,27 +11,37 @@ class LaserApi:
         self.rc = ctypes.windll.LoadLibrary(self.dll_path)
         print("Laser DLL loaded:", self.dll_path)
 
+    def _check(self, err, message):
+        if err != 0:
+            raise RuntimeError(f"{message}, error code: {err}")
+
     def connect(self, connection_type=1, comport_number=1):
-        return self.rc.rcConnect(connection_type, comport_number)
+        err = self.rc.rcConnect(connection_type, comport_number)
+        self._check(err, "Laser connection failed")
 
     def disconnect(self):
-        return self.rc.rcDisconnect()
+        err = self.rc.rcDisconnect()
+        self._check(err, "Laser disconnect failed")
 
-    def set_reg_nv_string(self, device, regname, value):
-        return self.rc.rcSetRegNVFromString(device, regname.encode(), value.encode())
+    def set_nv_string(self, device, regname, value):
+        err = self.rc.rcSetRegNVFromString(device, regname.encode(), value.encode())
+        self._check(err, f"Failed to set {regname} = {value}")
 
-    def set_reg_string(self, device, regname, value):
-        return self.rc.rcSetRegFromString(device, regname.encode(), value.encode())
+    def set_string(self, device, regname, value):
+        err = self.rc.rcSetRegFromString(device, regname.encode(), value.encode())
+        self._check(err, f"Failed to set {regname} = {value}")
 
-    def set_reg_double(self, device, regname, value):
+    def set_double(self, device, regname, value):
         if isinstance(regname, str):
             regname = regname.encode("latin1")
-        return self.rc.rcSetRegFromDouble(device, regname, ctypes.c_double(value))
+        err = self.rc.rcSetRegFromDouble(device, regname, ctypes.c_double(value))
+        self._check(err, f"Failed to set {regname} = {value}")
 
-    def set_reg_nv_double(self, device, regname, value):
-        return self.rc.rcSetRegNVFromDouble(device, regname.encode(), ctypes.c_double(value))
+    def set_nv_double(self, device, regname, value):
+        err = self.rc.rcSetRegNVFromDouble(device, regname.encode(), ctypes.c_double(value))
+        self._check(err, f"Failed to set {regname} = {value}")
 
-    def get_reg_string(self, device, regname, timeout_ms=2000):
+    def get_string(self, device, regname, timeout_ms=2000):
         reg_val_buf = ctypes.create_string_buffer(256)
         timestamp = ctypes.c_int()
 
@@ -43,7 +53,6 @@ class LaserApi:
             timeout_ms,
             ctypes.byref(timestamp),
         )
-        if err != 0:
-            return err, None
+        self._check(err, f"Failed to read {regname}")
 
-        return err, reg_val_buf.value.decode()
+        return reg_val_buf.value.decode()
