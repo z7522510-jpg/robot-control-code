@@ -6,12 +6,15 @@ class LaserApi:
     def __init__(self, dll_path):
         self.dll_path = os.path.abspath(dll_path)
         self.dll_dir = os.path.dirname(self.dll_path)
+        # Load the vendor DLL. Its dependent DLLs live in the same Laser folder.
         self.rc = ctypes.windll.LoadLibrary(self.dll_path)
         print("DLL loaded successfully")
 
     def connect(self):
         original_cwd = os.getcwd()
         try:
+            # rcConnect looks for REMOTECONTROL.INI and CANRS232.INI in cwd.
+            # Run it from the DLL folder so the vendor config files are found.
             os.chdir(self.dll_dir)
             err = self.rc.rcConnect(1, 1)
         finally:
@@ -23,6 +26,7 @@ class LaserApi:
         self.rc.rcDisconnect()
 
     def set_nv_string(self, device, regname, value):
+        # Vendor functions return 0 on success; non-zero values are error codes.
         err = self.rc.rcSetRegNVFromString(device, regname.encode(), value.encode())
         if err != 0:
             raise RuntimeError(f"Failed to set {regname} = {value}, error code: {err}")

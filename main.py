@@ -1,4 +1,4 @@
-import start
+from experiment import run_experiment
 
 if __name__ == "__main__":
-    start.run()
+    run_experiment()
