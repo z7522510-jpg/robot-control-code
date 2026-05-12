@@ -127,6 +127,31 @@ def stop_robot(dobot):
     return result
 
 
+def disconnect_robot(dobot):
+    if dobot is None:
+        return
+
+    try:
+        disable_result = dobot.dashboard.DisableRobot()
+        print("DisableRobot:", disable_result)
+    except Exception as error:
+        print("DisableRobot failed:", error)
+
+    try:
+        if dobot.dashboard is not None:
+            dobot.dashboard.close()
+    except Exception as error:
+        print("Dashboard close failed:", error)
+
+    try:
+        if dobot.feedFour is not None:
+            dobot.feedFour.close()
+    except Exception as error:
+        print("Feedback close failed:", error)
+
+    print("Dobot disconnected")
+
+
 def return_to_pose(dobot, saved_pose, speed_ratio, do_indexes=None):
     print("Returning to saved start pose:", saved_pose)
     try:

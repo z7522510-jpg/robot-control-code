@@ -1,6 +1,7 @@
 from .dobot import Dobot
 from .robot_control import (
     connect_robot,
+    disconnect_robot,
     enable_robot,
     has_robot_error,
     move_linear_point,
@@ -16,6 +17,7 @@ from .robot_control import (
 __all__ = [
     "Dobot",
     "connect_robot",
+    "disconnect_robot",
     "enable_robot",
     "has_robot_error",
     "move_linear_point",
