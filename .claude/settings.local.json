@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/Administrator/.ssh/**)",
+      "Bash(ssh -T git@github.com)",
+      "Bash(ssh -i ~/.ssh/id_ed25519_new -o IdentitiesOnly=yes -T git@github.com)",
+      "Bash(git config *)",
+      "Bash(git ls-remote *)"
+    ]
+  }
+}

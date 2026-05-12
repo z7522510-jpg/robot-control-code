@@ -1,7 +1,7 @@
 DOBOT_IP = "192.168.5.1"
 SPEED_RATIO = 30
 
-LASER_DLL_PATH = r"C:\Users\Administrator\Desktop\robot-control-code\Laser\REMOTECONTROL.dll"
+LASER_DLL_PATH = r"Laser\REMOTECONTROL.dll" # need to update
 LASER_FIRE_MODE = "Continuous"
 LASER_SYNC_MODE = "INTERNAL"
 LASER_SYNC_DELAY = "-80"
