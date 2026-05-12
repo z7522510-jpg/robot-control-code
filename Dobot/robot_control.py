@@ -91,6 +91,19 @@ def move_linear_point(dobot, point, speed_ratio):
     return True
 
 
+def move_relative_xyz(dobot, dx=0, dy=0, dz=0, speed_ratio=30):
+    current_pose = dobot.GetCurrentPose()
+    target_pose = current_pose.copy()
+    target_pose[0] = current_pose[0] + dx
+    target_pose[1] = current_pose[1] + dy
+    target_pose[2] = current_pose[2] + dz
+
+    print("Current pose:", current_pose)
+    print("Target pose:", target_pose)
+    move_linear_point(dobot, target_pose, speed_ratio)
+    return target_pose
+
+
 def set_digital_output(dobot, do_index, value):
     result = dobot.dashboard.DO(do_index, value)
     print(f"DO({do_index},{value}):", result)
