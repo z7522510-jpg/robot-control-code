@@ -69,6 +69,7 @@ def set_robot_speed(dobot, speed_ratio):
 
 
 def prepare_robot(dobot, speed_ratio):
+    # Standard robot startup for this experiment: enable first, then set speed.
     if not enable_robot(dobot):
         return False
     if not set_robot_speed(dobot, speed_ratio):
@@ -84,6 +85,8 @@ def start_feedback(dobot):
 
 
 def move_linear_point(dobot, point, speed_ratio):
+    # Blocking linear move. WaitCommandDone keeps the next command from
+    # starting before this motion reaches its target.
     move_result = dobot.dashboard.MovL(*point, 0, v=speed_ratio)
     print("MovL:", move_result)
     if not dobot.WaitCommandDone(move_result):
@@ -92,6 +95,8 @@ def move_linear_point(dobot, point, speed_ratio):
 
 
 def move_relative_xyz(dobot, dx=0, dy=0, dz=0, speed_ratio=30):
+    # Manual jog helper for notebook use. It changes only X/Y/Z and keeps the
+    # current orientation fields untouched.
     current_pose = dobot.GetCurrentPose()
     target_pose = current_pose.copy()
     target_pose[0] = current_pose[0] + dx
@@ -153,6 +158,8 @@ def disconnect_robot(dobot):
 
 
 def return_to_pose(dobot, saved_pose, speed_ratio, do_indexes=None):
+    # Recovery helper: stop queued motion, turn selected DO channels off, then
+    # return to the saved original pose.
     print("Returning to saved start pose:", saved_pose)
     try:
         stop_robot(dobot)
