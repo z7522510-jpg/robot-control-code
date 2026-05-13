@@ -209,17 +209,18 @@ class ExperimentGui(tk.Tk):
         try:
             with contextlib.redirect_stdout(QueueWriter(self.log_queue)):
                 import experiment
-                from Dobot import connect_robot, prepare_robot
+                from Dobot import initialize_robot
                 from Laser import connect_laser
 
-                if self.dobot is None:
-                    self.dobot = connect_robot(config.DOBOT_IP)
-                if not prepare_robot(self.dobot, config.SPEED_RATIO):
-                    raise RuntimeError("Robot initialization failed")
+                self.dobot, _feed_thread, _original_pose = initialize_robot(
+                    config.DOBOT_IP,
+                    config.SPEED_RATIO,
+                    dobot=self.dobot,
+                )
 
                 if self.laser is None:
                     self.laser = connect_laser(config.LASER_DLL_PATH)
-                experiment.initialize_laser_from_config(self.laser)
+                self.laser.initialize_laser(config.LASER_WAVELENGTH_NM)
 
             self.initialized = True
             self.log_queue.put("Robot and laser initialization complete")
@@ -256,14 +257,12 @@ class ExperimentGui(tk.Tk):
             with contextlib.redirect_stdout(QueueWriter(self.log_queue)):
                 import experiment
 
-                experiment.run_experiment(
-                    require_confirm=False,
-                    stop_event=self.stop_event,
-                    return_event=self.return_event,
+                experiment.run_initialized_experiment(
                     dobot=self.dobot,
                     laser=self.laser,
                     loop_wavelengths=self.loop_wavelengths,
-                    close_devices=False,
+                    stop_event=self.stop_event,
+                    return_event=self.return_event,
                 )
         except ModuleNotFoundError as error:
             self._log_missing_module(error)

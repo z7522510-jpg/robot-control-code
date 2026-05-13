@@ -1,7 +1,5 @@
 import threading
-import time
 from time import sleep
-from tracemalloc import stop
 
 from .dobot import Dobot
 
@@ -15,36 +13,17 @@ def calculate_step_count(total_distance_mm, step_distance_mm):
     return step_count
 
 
-def build_xyz_step_target(start_pose, step_index, step_offset_mm):
-    # Build a 3D step target. X/Y/Z move by the per-step offset multiplied by
-    # step_index; Rx/Ry/Rz stay the same as the start pose.
-    if len(start_pose) < 6:
-        raise ValueError("start_pose must contain X, Y, Z, Rx, Ry, and Rz")
-    if len(step_offset_mm) != 3:
-        raise ValueError("step_offset_mm must contain dx, dy, and dz")
-
-    target_pose = start_pose.copy()
-    target_pose[0] = start_pose[0] + step_offset_mm[0] * step_index
-    target_pose[1] = start_pose[1] + step_offset_mm[1] * step_index
-    target_pose[2] = start_pose[2] + step_offset_mm[2] * step_index
-    return target_pose
-
-
-def run_xyz_step_cycle(
+def run_step(
     dobot,
-    start_pose,
     step_index,
-    speed_ratio,
     step_offset_mm,
+    speed_ratio,
     step_wait_seconds,
     trigger_do_index,
     trigger_pulse_seconds,
-    loop_start_time=None,
 ):
-    # Record when DO turns on so the experiment can report trigger timing.
-    on_time_ms = None
-    if loop_start_time is not None:
-        on_time_ms = int((time.perf_counter() - loop_start_time) * 1000)
+    if len(step_offset_mm) != 3:
+        raise ValueError("step_offset_mm must contain dx, dy, and dz")
 
     # Send one DO pulse to the external device: on, wait, then off.
     do_on_result, do_off_result = dobot.SendDOPulse(
@@ -52,26 +31,24 @@ def run_xyz_step_cycle(
         trigger_pulse_seconds,
     )
 
-    # Record when DO turns off.
-    off_time_ms = None
-    if loop_start_time is not None:
-        off_time_ms = int((time.perf_counter() - loop_start_time) * 1000)
-
-    # Calculate this step's 3D target pose, then move there with a linear MovL.
-    target_pose = build_xyz_step_target(
-        start_pose,
-        step_index,
-        step_offset_mm,
+    move_result = dobot.dashboard.RelMovLUser(
+        step_offset_mm[0],
+        step_offset_mm[1],
+        step_offset_mm[2],
+        0,
+        0,
+        0,
+        v=speed_ratio,
     )
-    dobot.MoveLinearPoint(target_pose, speed_ratio)
+    print("RelMovLUser:", move_result)
+    if not dobot.WaitCommandDone(move_result):
+        raise RuntimeError("RelMovLUser failed or timed out")
+
     sleep(step_wait_seconds)
 
-    # Return this step's DO result and timing record for experiment.py.
     return {
         "step": step_index,
         "signal": f"DO({trigger_do_index},1)->DO({trigger_do_index},0)",
-        "on_time_ms": on_time_ms,
-        "off_time_ms": off_time_ms,
         "on_result": do_on_result,
         "off_result": do_off_result,
     }
@@ -81,6 +58,26 @@ def connect_robot(ip):
     dobot = Dobot(ip)
     dobot.connect()
     return dobot
+
+
+def initialize_robot(ip, speed_ratio, dobot=None, feed_thread=None):
+    if dobot is None:
+        dobot = connect_robot(ip)
+
+    if not prepare_robot(dobot, speed_ratio):
+        raise RuntimeError("Dobot prepare failed")
+
+    if has_robot_error(dobot):
+        raise RuntimeError("Dobot has active errors")
+
+    if feed_thread is None:
+        feed_thread = start_feedback(dobot)
+        sleep(1)
+
+    original_pose = dobot.GetCurrentPose()
+    print("Original pose saved:", original_pose)
+    print("Dobot ON and ready")
+    return dobot, feed_thread, original_pose
 
 
 def has_robot_error(dobot):
@@ -168,15 +165,14 @@ def move_linear_point(dobot, point, speed_ratio):
 
 
 def move_relative_xyz(dobot, dx=0, dy=0, dz=0, speed_ratio=30):
-    # Manual jog helper for notebook use. It changes only X/Y/Z and keeps the
-    # current orientation fields untouched.
-    current_pose = dobot.GetCurrentPose()
-    target_pose = build_xyz_step_target(current_pose, 1, (dx, dy, dz))
+    move_result = dobot.dashboard.RelMovLUser(dx, dy, dz, 0, 0, 0, v=speed_ratio)
+    print("RelMovLUser:", move_result)
+    if not dobot.WaitCommandDone(move_result):
+        raise RuntimeError("RelMovLUser failed or timed out")
 
+    current_pose = dobot.GetCurrentPose()
     print("Current pose:", current_pose)
-    print("Target pose:", target_pose)
-    move_linear_point(dobot, target_pose, speed_ratio)
-    return target_pose
+    return current_pose
 
 
 def set_digital_output(dobot, do_index, value):
@@ -240,7 +236,7 @@ def return_to_pose(dobot, saved_pose, speed_ratio, do_indexes=None):
     for do_index in do_indexes or []:
         try:
             turn_do_off(dobot, do_index)
-            stop(.2)
+            sleep(0.2)
         except Exception as error:
             print(f"DO({do_index},0) failed:", error)
 

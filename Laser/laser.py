@@ -6,6 +6,9 @@ from .laser_api import LaserApi
 NL30X_DEVICE = b"NL30x:8"
 MAXIOPG_DEVICE = b"MaxiOPG:31"
 ATTENUATOR_REGISTER = b"ATTN. RotH 1.8\xb0/64 600mA."
+DEFAULT_FIRE_MODE = "Continuous"
+DEFAULT_SYNC_MODE = "INTERNAL"
+DEFAULT_SYNC_DELAY = "-80"
 
 
 class Laser:
@@ -59,28 +62,30 @@ class Laser:
     def get_string(self, device, regname, timeout_ms=2000):
         return self.api.get_string(device, regname, timeout_ms)
 
-    def configure_laser(self, firemode, syncmode, sync_delay, wavelength):
-        self.api.set_nv_string(self.dev_nl30x, "Sync mode", syncmode)
-        self.api.set_string(self.dev_nl30x, "Continuous / Burst mode / Trigger burst", firemode)
-        self.api.set_string(self.dev_nl30x, "SyncOut delay", sync_delay)
-        self.api.set_nv_string(self.dev_maxiopg, "Configuration", "Air")
-        self.set_wavelength(wavelength)
-
-        time.sleep(0.1)
-        self.api.set_double(self.dev_maxiopg, ATTENUATOR_REGISTER, 272)
-
     def warm_up(self, seconds=10):
         self.run()
         time.sleep(seconds)
         self.stop()
 
-    def initialize_laser(self, firemode, syncmode, sync_delay, wavelength):
+    def initialize_laser(
+        self,
+        wavelength,
+        firemode=DEFAULT_FIRE_MODE,
+        syncmode=DEFAULT_SYNC_MODE,
+        sync_delay=DEFAULT_SYNC_DELAY,
+    ):
         if self.initialized:
             print("Laser already initialized")
             return
 
         print("Initializing laser...")
-        self.configure_laser(firemode, syncmode, sync_delay, wavelength)
+        self.api.set_nv_string(self.dev_nl30x, "Sync mode", syncmode)
+        self.api.set_string(self.dev_nl30x, "Continuous / Burst mode / Trigger burst", firemode)
+        self.api.set_string(self.dev_nl30x, "SyncOut delay", sync_delay)
+        self.api.set_nv_string(self.dev_maxiopg, "Configuration", "Air")
+        self.set_wavelength(wavelength)
+        time.sleep(0.1)
+        self.api.set_double(self.dev_maxiopg, ATTENUATOR_REGISTER, 272)
         time.sleep(1)
         self.warm_up()
 
@@ -107,9 +112,6 @@ class Laser:
     def set_wavelength(self, wavelength):
         self.api.set_nv_double(self.dev_maxiopg, "WaveLength", wavelength)
         print(f"Laser wavelength set to {wavelength} nm")
-
-    def setwavelength(self, wavelength):
-        self.set_wavelength(wavelength)
 
 
 def connect_laser(dll_path):

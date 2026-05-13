@@ -1,17 +1,14 @@
-import threading
-import time
 import math
 from time import sleep
 
 import config
 from Dobot import (
-    build_xyz_step_target,
     calculate_step_count,
     connect_robot,
     has_robot_error,
     prepare_robot,
     return_to_pose,
-    run_xyz_step_cycle,
+    run_step,
     start_feedback,
 )
 from Laser import connect_laser
@@ -19,45 +16,6 @@ from Laser import connect_laser
 
 def empty_result():
     return {"do_records": [], "endpoint_records": []}
-
-
-def elapsed_ms(start_time):
-    return int((time.perf_counter() - start_time) * 1000)
-
-
-def format_ms(milliseconds):
-    return f"{milliseconds / 1000:.3f}s"
-
-
-class LoopTimer:
-    def __init__(self):
-        self.stop_event = None
-        self.thread = None
-
-    def start(self, loop_index, loop_start_time):
-        self.stop_event = threading.Event()
-        self.thread = threading.Thread(
-            target=self._run,
-            args=(loop_index, loop_start_time),
-        )
-        self.thread.daemon = True
-        self.thread.start()
-
-    def stop(self):
-        if self.stop_event is not None:
-            self.stop_event.set()
-        if self.thread is not None:
-            self.thread.join()
-        self.stop_event = None
-        self.thread = None
-
-    def _run(self, loop_index, start_time):
-        next_second = 1
-        while not self.stop_event.wait(0.01):
-            current_ms = elapsed_ms(start_time)
-            if current_ms >= next_second * 1000:
-                print(f"[Loop {loop_index}] timer: {format_ms(current_ms)}")
-                next_second += 1
 
 
 def validate_step_offset():
@@ -71,17 +29,6 @@ def get_step_distance_mm(validate=True):
     if validate and len(config.STEP_OFFSET_MM) != 3:
         raise ValueError("STEP_OFFSET_MM must be [dx, dy, dz]")
     return math.sqrt(sum(offset * offset for offset in config.STEP_OFFSET_MM))
-
-
-def initialize_laser_from_config(laser):
-    # Laser warm-up and wavelength setup live in Laser; experiment only passes
-    # the current config values.
-    laser.initialize_laser(
-        config.LASER_FIRE_MODE,
-        config.LASER_SYNC_MODE,
-        config.LASER_SYNC_DELAY,
-        config.LASER_WAVELENGTH_NM,
-    )
 
 
 def prompt_positive_number(prompt, default, value_type=float):
@@ -124,41 +71,27 @@ def prompt_experiment_plan():
     return loop_count, loop_wavelengths
 
 
-def run_dobot_step(dobot, start_pose, loop_index, step_index, loop_start_time, do_records):
-    target_pose = build_xyz_step_target(
-        start_pose,
-        step_index,
-        config.STEP_OFFSET_MM,
-    )
+def run_dobot_step(dobot, loop_index, step_index, do_records):
     print(
         f"[Loop {loop_index} Step {step_index}] "
-        f"Move target XYZ=({target_pose[0]:.3f}, {target_pose[1]:.3f}, {target_pose[2]:.3f})"
+        f"Move offset XYZ={config.STEP_OFFSET_MM}"
     )
 
-    cycle_record = run_xyz_step_cycle(
+    cycle_record = run_step(
         dobot,
-        start_pose,
         step_index,
-        config.SPEED_RATIO,
         config.STEP_OFFSET_MM,
+        config.SPEED_RATIO,
         config.STEP_WAIT_SECONDS,
         config.TRIGGER_DO_INDEX,
         config.TRIGGER_PULSE_SECONDS,
-        loop_start_time=loop_start_time,
     )
 
     do_records.append({
         "loop": loop_index,
         **cycle_record,
     })
-    print(
-        f"[Loop {loop_index} Step {step_index}] "
-        f"DO pulse ON at {format_ms(cycle_record['on_time_ms'])}: {cycle_record['on_result']}"
-    )
-    print(
-        f"[Loop {loop_index} Step {step_index}] "
-        f"DO pulse OFF at {format_ms(cycle_record['off_time_ms'])}: {cycle_record['off_result']}"
-    )
+    print(f"[Loop {loop_index} Step {step_index}] DO pulse result: {cycle_record['on_result']}, {cycle_record['off_result']}")
 
 
 def record_endpoint(dobot, loop_index, endpoint_records, wavelength_nm):
@@ -179,7 +112,6 @@ def print_records(do_records, endpoint_records):
         print(
             f"Loop {record['loop']} Step {record['step']}: "
             f"{record['signal']}, "
-            f"on={record['on_time_ms']}ms, off={record['off_time_ms']}ms, "
             f"on_result={record['on_result']}, off_result={record['off_result']}"
         )
     print("Final endpoint records:")
@@ -195,26 +127,27 @@ def return_requested(return_event):
     return return_event is not None and return_event.is_set()
 
 
-def run_experiment(
-    require_confirm=True,
+def run_experiment(require_confirm=True):
+    dobot = connect_robot(config.DOBOT_IP)
+    laser = connect_laser(config.LASER_DLL_PATH)
+    try:
+        return run_initialized_experiment(dobot, laser, require_confirm=require_confirm)
+    finally:
+        laser.close()
+
+
+def run_initialized_experiment(
+    dobot,
+    laser,
+    loop_wavelengths=None,
     stop_event=None,
     return_event=None,
-    dobot=None,
-    laser=None,
-    loop_wavelengths=None,
-    close_devices=True,
+    require_confirm=False,
 ):
-    # Connect both devices first; cleanup in finally keeps laser off even if
-    # the robot loop is interrupted.
-    if dobot is None:
-        dobot = connect_robot(config.DOBOT_IP)
-    if laser is None:
-        laser = connect_laser(config.LASER_DLL_PATH)
 
     do_records = []
     endpoint_records = []
     saved_start_pose = None
-    loop_timer = LoopTimer()
 
     try:
         validate_step_offset()
@@ -222,7 +155,7 @@ def run_experiment(
         if not prepare_robot(dobot, config.SPEED_RATIO):
             return empty_result()
 
-        initialize_laser_from_config(laser)
+        laser.initialize_laser(config.LASER_WAVELENGTH_NM)
 
         # Non-interactive callers use config defaults; interactive runs can
         # override loop count and wavelength plan before motion starts.
@@ -269,7 +202,6 @@ def run_experiment(
             sleep(2)  # Short wait after wavelength change before starting motion; laser is already running, so no long warm-up needed.
             start_pose = dobot.GetCurrentPose()
             print(f"Loop {loop_index} start current pose:", start_pose)
-            loop_start_time = None
             if loop_index == 1:
                 sleep(6)  # Longer wait before the first loop to allow for final confirmation and setup
 
@@ -290,35 +222,21 @@ def run_experiment(
                     laser.stop_safely()
                     return {"do_records": do_records, "endpoint_records": endpoint_records}
 
-                if loop_start_time is None:
-                    # Start laser exactly once per loop. It stays running while
-                    # Dobot repeats pulse -> move -> wait.
-                    loop_start_time = time.perf_counter()
-                    loop_timer.start(loop_index, loop_start_time)
-                    print(f"[Loop {loop_index}] loop timer start at {format_ms(elapsed_ms(loop_start_time))}")
-
-                run_dobot_step(dobot, start_pose, loop_index, step_index, loop_start_time, do_records)
+                run_dobot_step(dobot, loop_index, step_index, do_records)
 
             record_endpoint(dobot, loop_index, endpoint_records, loop_wavelength)
 
             print(f"Loop {loop_index} reached {config.TOTAL_DISTANCE_MM}mm. Returning to start pose.")
-            return_start_ms = elapsed_ms(loop_start_time)
             dobot.MoveLinearPoint(saved_start_pose, config.SPEED_RATIO)
-            return_end_ms = elapsed_ms(loop_start_time)
-            print(
-                f"Loop {loop_index} returned to start at {format_ms(return_end_ms)}, "
-                f"return duration={return_end_ms - return_start_ms}ms"
-            )
+            print(f"Loop {loop_index} returned to start")
             end_pose = dobot.GetCurrentPose()
             print(f"Loop {loop_index} end current pose:", end_pose)
 
-            loop_timer.stop()
             print(f"Loop {loop_index}/{loop_count} finished")
     except KeyboardInterrupt:
         # Manual interruption should leave the setup in a known safe state:
-        # timer stopped, laser stopped, robot returned if possible.
+        # laser stopped, robot returned if possible.
         print("Ctrl+C detected. Returning to saved start pose.")
-        loop_timer.stop()
         laser.stop_safely()
         if saved_start_pose is not None:
             return_to_pose(
@@ -328,11 +246,7 @@ def run_experiment(
                 do_indexes=[config.TRIGGER_DO_INDEX],
             )
     finally:
-        loop_timer.stop()
-        if close_devices:
-            laser.close()
-        else:
-            laser.stop_safely()
+        laser.stop_safely()
 
     print_records(do_records, endpoint_records)
     return {"do_records": do_records, "endpoint_records": endpoint_records}
