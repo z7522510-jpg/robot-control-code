@@ -4,6 +4,43 @@ from time import sleep
 from .dobot import Dobot
 
 
+def calculate_step_count(total_distance_mm, step_distance_mm):
+    step_count = int(total_distance_mm / step_distance_mm)
+    total_distance = step_count * step_distance_mm
+    if abs(total_distance - total_distance_mm) > 1e-9:
+        raise ValueError("total_distance_mm must be divisible by step_distance_mm")
+    return step_count
+
+
+def build_y_step_target(start_pose, step_index, step_distance_mm):
+    target_pose = start_pose.copy()
+    target_pose[1] = start_pose[1] - step_distance_mm * step_index
+    return target_pose
+
+
+def run_y_step_cycle(
+    dobot,
+    start_pose,
+    step_index,
+    speed_ratio,
+    step_distance_mm,
+    step_wait_seconds,
+    trigger_do_index,
+    trigger_pulse_seconds,
+    loop_start_time=None,
+):
+    return dobot.RunYStepCycle(
+        start_pose,
+        step_index,
+        speed_ratio,
+        step_distance_mm,
+        step_wait_seconds,
+        trigger_do_index,
+        trigger_pulse_seconds,
+        loop_start_time=loop_start_time,
+    )
+
+
 def connect_robot(ip):
     dobot = Dobot(ip)
     dobot.connect()
