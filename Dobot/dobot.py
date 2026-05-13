@@ -76,10 +76,14 @@ class Dobot:
         return result
 
     def SendDOPulse(self, do_index, pulse_seconds):
-        do_on_result = self.SetDigitalOutput(do_index, 1)
-        sleep(pulse_seconds)
-        do_off_result = self.SetDigitalOutput(do_index, 0)
-        return do_on_result, do_off_result
+        # Use controller's built-in DO auto-invert (DO(idx,1,time_ms)). The
+        # controller hardware toggles the pin back after time_ms, so the wire
+        # pulse width is stable regardless of TCP latency. Minimum is 25 ms.
+        pulse_ms = max(25, int(round(pulse_seconds * 1000)))
+        result = self.dashboard.DO(do_index, 1, pulse_ms)
+        print(f"DO({do_index},1,{pulse_ms}ms):", result)
+        sleep(pulse_ms / 1000)
+        return result, result
 
     def RunArc(self, mid_point, end_point, cp=-1, wait=True):
         # 圆弧指令：从当前位置出发，经过 mid_point，到达 end_point

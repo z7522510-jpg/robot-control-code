@@ -8,7 +8,7 @@ LASER_SYNC_DELAY = "-80"
 LASER_WAVELENGTH_NM = 670
 
 TRIGGER_DO_INDEX = 1
-TRIGGER_PULSE_SECONDS = 0.025
+TRIGGER_PULSE_SECONDS = 0.001
 
 STEP_DISTANCE_MM = .5
 # Per-step scan movement vector in XYZ, in millimeters: [dx, dy, dz].
@@ -19,6 +19,6 @@ STEP_DISTANCE_MM = .5
 #   Z positive: [0, 0, STEP_DISTANCE_MM]
 #   45 degrees in XY: [0.3536, -0.3536, 0]  # length is about 0.5 mm
 STEP_OFFSET_MM = [-STEP_DISTANCE_MM, 0, 0]
-TOTAL_DISTANCE_MM  = 4
+TOTAL_DISTANCE_MM  = 10
 LOOP_REPEAT_COUNT = 1
 STEP_WAIT_SECONDS = 0.150

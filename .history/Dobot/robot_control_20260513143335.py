@@ -240,7 +240,7 @@ def return_to_pose(dobot, saved_pose, speed_ratio, do_indexes=None):
     for do_index in do_indexes or []:
         try:
             turn_do_off(dobot, do_index)
-            stop(.2)
+            stop(.1)
         except Exception as error:
             print(f"DO({do_index},0) failed:", error)
 
