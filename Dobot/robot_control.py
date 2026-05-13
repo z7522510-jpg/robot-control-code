@@ -1,10 +1,12 @@
 import threading
+import time
 from time import sleep
 
 from .dobot import Dobot
 
 
 def calculate_step_count(total_distance_mm, step_distance_mm):
+    # Calculate how many steps are needed from the total distance and step size.
     step_count = int(total_distance_mm / step_distance_mm)
     total_distance = step_count * step_distance_mm
     if abs(total_distance - total_distance_mm) > 1e-9:
@@ -12,33 +14,66 @@ def calculate_step_count(total_distance_mm, step_distance_mm):
     return step_count
 
 
-def build_y_step_target(start_pose, step_index, step_distance_mm):
+def build_xyz_step_target(start_pose, step_index, step_offset_mm):
+    # Build a 3D step target. X/Y/Z move by the per-step offset multiplied by
+    # step_index; Rx/Ry/Rz stay the same as the start pose.
+    if len(start_pose) < 6:
+        raise ValueError("start_pose must contain X, Y, Z, Rx, Ry, and Rz")
+    if len(step_offset_mm) != 3:
+        raise ValueError("step_offset_mm must contain dx, dy, and dz")
+
     target_pose = start_pose.copy()
-    target_pose[1] = start_pose[1] - step_distance_mm * step_index
+    target_pose[0] = start_pose[0] + step_offset_mm[0] * step_index
+    target_pose[1] = start_pose[1] + step_offset_mm[1] * step_index
+    target_pose[2] = start_pose[2] + step_offset_mm[2] * step_index
     return target_pose
 
 
-def run_y_step_cycle(
+def run_xyz_step_cycle(
     dobot,
     start_pose,
     step_index,
     speed_ratio,
-    step_distance_mm,
+    step_offset_mm,
     step_wait_seconds,
     trigger_do_index,
     trigger_pulse_seconds,
     loop_start_time=None,
 ):
-    return dobot.RunYStepCycle(
-        start_pose,
-        step_index,
-        speed_ratio,
-        step_distance_mm,
-        step_wait_seconds,
+    # Record when DO turns on so the experiment can report trigger timing.
+    on_time_ms = None
+    if loop_start_time is not None:
+        on_time_ms = int((time.perf_counter() - loop_start_time) * 1000)
+
+    # Send one DO pulse to the external device: on, wait, then off.
+    do_on_result, do_off_result = dobot.SendDOPulse(
         trigger_do_index,
         trigger_pulse_seconds,
-        loop_start_time=loop_start_time,
     )
+
+    # Record when DO turns off.
+    off_time_ms = None
+    if loop_start_time is not None:
+        off_time_ms = int((time.perf_counter() - loop_start_time) * 1000)
+
+    # Calculate this step's 3D target pose, then move there with a linear MovL.
+    target_pose = build_xyz_step_target(
+        start_pose,
+        step_index,
+        step_offset_mm,
+    )
+    dobot.MoveLinearPoint(target_pose, speed_ratio)
+    sleep(step_wait_seconds)
+
+    # Return this step's DO result and timing record for experiment.py.
+    return {
+        "step": step_index,
+        "signal": f"DO({trigger_do_index},1)->DO({trigger_do_index},0)",
+        "on_time_ms": on_time_ms,
+        "off_time_ms": off_time_ms,
+        "on_result": do_on_result,
+        "off_result": do_off_result,
+    }
 
 
 def connect_robot(ip):
@@ -135,10 +170,7 @@ def move_relative_xyz(dobot, dx=0, dy=0, dz=0, speed_ratio=30):
     # Manual jog helper for notebook use. It changes only X/Y/Z and keeps the
     # current orientation fields untouched.
     current_pose = dobot.GetCurrentPose()
-    target_pose = current_pose.copy()
-    target_pose[0] = current_pose[0] + dx
-    target_pose[1] = current_pose[1] + dy
-    target_pose[2] = current_pose[2] + dz
+    target_pose = build_xyz_step_target(current_pose, 1, (dx, dy, dz))
 
     print("Current pose:", current_pose)
     print("Target pose:", target_pose)

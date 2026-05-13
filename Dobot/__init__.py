@@ -1,6 +1,6 @@
 from .dobot import Dobot
 from .robot_control import (
-    build_y_step_target,
+    build_xyz_step_target,
     calculate_step_count,
     connect_robot,
     disconnect_robot,
@@ -10,7 +10,7 @@ from .robot_control import (
     move_relative_xyz,
     prepare_robot,
     return_to_pose,
-    run_y_step_cycle,
+    run_xyz_step_cycle,
     send_do_pulse,
     set_robot_speed,
     start_feedback,
@@ -19,7 +19,7 @@ from .robot_control import (
 
 __all__ = [
     "Dobot",
-    "build_y_step_target",
+    "build_xyz_step_target",
     "calculate_step_count",
     "connect_robot",
     "disconnect_robot",
@@ -29,7 +29,7 @@ __all__ = [
     "move_relative_xyz",
     "prepare_robot",
     "return_to_pose",
-    "run_y_step_cycle",
+    "run_xyz_step_cycle",
     "send_do_pulse",
     "set_robot_speed",
     "start_feedback",

@@ -68,11 +68,6 @@ class Dobot:
             raise RuntimeError("MovL failed or timed out")
         return True
 
-    def BuildYStepTarget(self, start_pose, step_index, step_distance_mm):
-        target_pose = start_pose.copy()
-        target_pose[1] = start_pose[1] - step_distance_mm * step_index
-        return target_pose
-
     def SetDigitalOutput(self, do_index, value):
         result = self.dashboard.DO(do_index, value)
         print(f"DO({do_index},{value}):", result)
@@ -83,42 +78,6 @@ class Dobot:
         sleep(pulse_seconds)
         do_off_result = self.SetDigitalOutput(do_index, 0)
         return do_on_result, do_off_result
-
-    def RunYStepCycle(
-        self,
-        start_pose,
-        step_index,
-        speed_ratio,
-        step_distance_mm,
-        step_wait_seconds,
-        trigger_do_index,
-        trigger_pulse_seconds,
-        loop_start_time=None,
-    ):
-        on_time_ms = None
-        if loop_start_time is not None:
-            on_time_ms = int((time.perf_counter() - loop_start_time) * 1000)
-
-        do_on_result, do_off_result = self.SendDOPulse(
-            trigger_do_index,
-            trigger_pulse_seconds,
-        )
-        off_time_ms = None
-        if loop_start_time is not None:
-            off_time_ms = int((time.perf_counter() - loop_start_time) * 1000)
-
-        target_pose = self.BuildYStepTarget(start_pose, step_index, step_distance_mm)
-        self.MoveLinearPoint(target_pose, speed_ratio)
-        sleep(step_wait_seconds)
-
-        return {
-            "step": step_index,
-            "signal": f"DO({trigger_do_index},1)->DO({trigger_do_index},0)",
-            "on_time_ms": on_time_ms,
-            "off_time_ms": off_time_ms,
-            "on_result": do_on_result,
-            "off_result": do_off_result,
-        }
 
     def RunArc(self, mid_point, end_point, cp=-1, wait=True):
         # 圆弧指令：从当前位置出发，经过 mid_point，到达 end_point

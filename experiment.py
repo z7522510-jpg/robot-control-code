@@ -1,13 +1,17 @@
 import threading
 import time
+import math
 from time import sleep
 
 import config
 from Dobot import (
+    build_xyz_step_target,
+    calculate_step_count,
     connect_robot,
     has_robot_error,
     prepare_robot,
     return_to_pose,
+    run_xyz_step_cycle,
     start_feedback,
 )
 from Laser import connect_laser
@@ -56,12 +60,17 @@ class LoopTimer:
                 next_second += 1
 
 
-def calculate_step_count():
-    step_count = int(config.TOTAL_DISTANCE_MM / config.STEP_DISTANCE_MM)
-    total_distance = step_count * config.STEP_DISTANCE_MM
-    if abs(total_distance - config.TOTAL_DISTANCE_MM) > 1e-9:
-        raise ValueError("TOTAL_DISTANCE_MM must be divisible by STEP_DISTANCE_MM")
-    return step_count
+def validate_step_offset():
+    if len(config.STEP_OFFSET_MM) != 3:
+        raise ValueError("STEP_OFFSET_MM must be [dx, dy, dz]")
+    if get_step_distance_mm(validate=False) <= 1e-12:
+        raise ValueError("STEP_OFFSET_MM must include movement in at least one XYZ direction")
+
+
+def get_step_distance_mm(validate=True):
+    if validate and len(config.STEP_OFFSET_MM) != 3:
+        raise ValueError("STEP_OFFSET_MM must be [dx, dy, dz]")
+    return math.sqrt(sum(offset * offset for offset in config.STEP_OFFSET_MM))
 
 
 def initialize_laser_from_config(laser):
@@ -116,21 +125,22 @@ def prompt_experiment_plan():
 
 
 def run_dobot_step(dobot, start_pose, loop_index, step_index, loop_start_time, do_records):
-    target_pose = dobot.BuildYStepTarget(
+    target_pose = build_xyz_step_target(
         start_pose,
         step_index,
-        config.STEP_DISTANCE_MM,
+        config.STEP_OFFSET_MM,
     )
     print(
         f"[Loop {loop_index} Step {step_index}] "
-        f"Move target Y={target_pose[1]:.3f}"
+        f"Move target XYZ=({target_pose[0]:.3f}, {target_pose[1]:.3f}, {target_pose[2]:.3f})"
     )
 
-    cycle_record = dobot.RunYStepCycle(
+    cycle_record = run_xyz_step_cycle(
+        dobot,
         start_pose,
         step_index,
         config.SPEED_RATIO,
-        config.STEP_DISTANCE_MM,
+        config.STEP_OFFSET_MM,
         config.STEP_WAIT_SECONDS,
         config.TRIGGER_DO_INDEX,
         config.TRIGGER_PULSE_SECONDS,
@@ -189,6 +199,8 @@ def run_experiment(require_confirm=True):
     loop_timer = LoopTimer()
 
     try:
+        validate_step_offset()
+
         if not prepare_robot(dobot, config.SPEED_RATIO):
             return empty_result()
 
@@ -214,11 +226,12 @@ def run_experiment(require_confirm=True):
         start_feedback(dobot)
         sleep(1)
 
-        step_count = calculate_step_count()
+        step_distance_mm = get_step_distance_mm()
+        step_count = calculate_step_count(config.TOTAL_DISTANCE_MM, step_distance_mm)
         saved_start_pose = dobot.GetCurrentPose()
         print("Saved start pose:", saved_start_pose)
-        print("Direction: -Y")
-        print("Step distance:", config.STEP_DISTANCE_MM, "mm")
+        print("Step offset XYZ:", config.STEP_OFFSET_MM, "mm")
+        print("Step distance:", step_distance_mm, "mm")
         print("Total distance per loop:", config.TOTAL_DISTANCE_MM, "mm")
         print("Step count per loop:", step_count)
 
@@ -226,7 +239,7 @@ def run_experiment(require_confirm=True):
         print("Laser RUN for experiment")
 
         for loop_index in range(1, loop_count + 1):
-            # Each loop starts from the current pose, moves step-by-step in -Y,
+            # Each loop starts from the current pose, moves step-by-step,
             # records the endpoint, then returns to the original saved pose.
             loop_wavelength = loop_wavelengths[loop_index - 1]
             print(f"Loop {loop_index}/{loop_count} start")
