@@ -1,6 +1,8 @@
 try:
     from .dobot_api import DobotApiFeedBack, DobotApiDashboard
 except ImportError:
+    if __package__:
+        raise
     from dobot_api import DobotApiFeedBack, DobotApiDashboard
 import threading
 from time import sleep

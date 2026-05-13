@@ -195,11 +195,21 @@ def return_requested(return_event):
     return return_event is not None and return_event.is_set()
 
 
-def run_experiment(require_confirm=True, stop_event=None, return_event=None):
+def run_experiment(
+    require_confirm=True,
+    stop_event=None,
+    return_event=None,
+    dobot=None,
+    laser=None,
+    loop_wavelengths=None,
+    close_devices=True,
+):
     # Connect both devices first; cleanup in finally keeps laser off even if
     # the robot loop is interrupted.
-    dobot = connect_robot(config.DOBOT_IP)
-    laser = connect_laser(config.LASER_DLL_PATH)
+    if dobot is None:
+        dobot = connect_robot(config.DOBOT_IP)
+    if laser is None:
+        laser = connect_laser(config.LASER_DLL_PATH)
 
     do_records = []
     endpoint_records = []
@@ -217,7 +227,10 @@ def run_experiment(require_confirm=True, stop_event=None, return_event=None):
         # Non-interactive callers use config defaults; interactive runs can
         # override loop count and wavelength plan before motion starts.
         loop_count = config.LOOP_REPEAT_COUNT
-        loop_wavelengths = [config.LASER_WAVELENGTH_NM] * loop_count
+        if loop_wavelengths is None:
+            loop_wavelengths = [config.LASER_WAVELENGTH_NM] * loop_count
+        else:
+            loop_count = len(loop_wavelengths)
 
         if require_confirm:
             loop_count, loop_wavelengths = prompt_experiment_plan()
@@ -316,7 +329,10 @@ def run_experiment(require_confirm=True, stop_event=None, return_event=None):
             )
     finally:
         loop_timer.stop()
-        laser.close()
+        if close_devices:
+            laser.close()
+        else:
+            laser.stop_safely()
 
     print_records(do_records, endpoint_records)
     return {"do_records": do_records, "endpoint_records": endpoint_records}
