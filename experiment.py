@@ -187,7 +187,15 @@ def print_records(do_records, endpoint_records):
         print(f"Loop {record['loop']}: endpoint_pose={record['endpoint_pose']}")
 
 
-def run_experiment(require_confirm=True):
+def stop_requested(stop_event):
+    return stop_event is not None and stop_event.is_set()
+
+
+def return_requested(return_event):
+    return return_event is not None and return_event.is_set()
+
+
+def run_experiment(require_confirm=True, stop_event=None, return_event=None):
     # Connect both devices first; cleanup in finally keeps laser off even if
     # the robot loop is interrupted.
     dobot = connect_robot(config.DOBOT_IP)
@@ -253,6 +261,22 @@ def run_experiment(require_confirm=True):
                 sleep(6)  # Longer wait before the first loop to allow for final confirmation and setup
 
             for step_index in range(1, step_count + 1):
+                if return_requested(return_event):
+                    print("Return to start requested")
+                    laser.stop_safely()
+                    return_to_pose(
+                        dobot,
+                        saved_start_pose,
+                        config.SPEED_RATIO,
+                        do_indexes=[config.TRIGGER_DO_INDEX],
+                    )
+                    return {"do_records": do_records, "endpoint_records": endpoint_records}
+
+                if stop_requested(stop_event):
+                    print("Stop requested")
+                    laser.stop_safely()
+                    return {"do_records": do_records, "endpoint_records": endpoint_records}
+
                 if loop_start_time is None:
                     # Start laser exactly once per loop. It stays running while
                     # Dobot repeats pulse -> move -> wait.
