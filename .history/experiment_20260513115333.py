@@ -245,12 +245,11 @@ def run_experiment(require_confirm=True):
             print(f"Loop {loop_index}/{loop_count} start")
             print(f"Loop {loop_index} wavelength:", loop_wavelength, "nm")
             laser.set_wavelength(loop_wavelength)
-            sleep(2)  # Short wait after wavelength change before starting motion; laser is already running, so no long warm-up needed.
             start_pose = dobot.GetCurrentPose()
             print(f"Loop {loop_index} start current pose:", start_pose)
             loop_start_time = None
             if loop_index == 1:
-                sleep(6)  # Longer wait before the first loop to allow for final confirmation and setup
+                sleep(10)  # Longer wait before the first loop to allow for final confirmation and setup
 
             for step_index in range(1, step_count + 1):
                 if loop_start_time is None:
@@ -263,6 +262,7 @@ def run_experiment(require_confirm=True):
                 run_dobot_step(dobot, start_pose, loop_index, step_index, loop_start_time, do_records)
 
             record_endpoint(dobot, loop_index, endpoint_records, loop_wavelength)
+            sleep(1)
 
             print(f"Loop {loop_index} reached {config.TOTAL_DISTANCE_MM}mm. Returning to start pose.")
             return_start_ms = elapsed_ms(loop_start_time)
