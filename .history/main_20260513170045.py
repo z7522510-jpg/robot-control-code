@@ -1,4 +1,4 @@
-from experiment1 import run_experiment
+from experiment1 import run_experimen
 
 if __name__ == "__main__":
     run_experiment()

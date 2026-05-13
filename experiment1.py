@@ -4,8 +4,8 @@ from time import sleep
 from Dobot import (
     calculate_step_count,
     initialize_robot,
-    return_to_pose,
     run_step,
+    turn_do_off,
 )
 from Laser import connect_laser
 
@@ -107,12 +107,8 @@ def run_experiment():
                     config.TRIGGER_PULSE_SECONDS,
                 )
 
-            return_to_pose(
-                dobot,
-                saved_start_pose,
-                config.SPEED_RATIO,
-                do_indexes=[config.TRIGGER_DO_INDEX],
-            )
+            turn_do_off(dobot, config.TRIGGER_DO_INDEX)
+            dobot.MoveLinearPoint(saved_start_pose, config.SPEED_RATIO)
             sleep(2)
 
     finally:
