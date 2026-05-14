@@ -39,9 +39,14 @@ class Dobot:
     def GetFeed(self):
         # 获取机器人状态
         while True:
-            feedInfo = self.feedFour.feedBackData()
+            try:
+                feedInfo = self.feedFour.feedBackData()
+            except (OSError, AttributeError):
+                # Socket 被 disconnect_robot 关掉后 recv 会抛 OSError(WinError 10038)。
+                # 这里静默退出,避免线程 traceback 污染终端。
+                return
             with self.__globalLockValue:
-                if feedInfo is not None:   
+                if feedInfo is not None:
                     if hex((feedInfo['TestValue'][0])) == '0x123456789abcdef':
                         # 基础字段
                         self.feedData.MessageSize = feedInfo['len'][0]

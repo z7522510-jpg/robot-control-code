@@ -25,6 +25,12 @@ def run_step(
     if len(step_offset_mm) != 3:
         raise ValueError("step_offset_mm must contain dx, dy, and dz")
 
+    # Send one DO pulse to the external device: on, wait, then off.
+    do_on_result, do_off_result = dobot.SendDOPulse(
+        trigger_do_index,
+        trigger_pulse_seconds,
+    )
+
     move_result = dobot.dashboard.RelMovLUser(
         step_offset_mm[0],
         step_offset_mm[1],
@@ -33,11 +39,6 @@ def run_step(
         0,
         0,
         v=speed_ratio,
-    )
-    # Send one DO pulse to the external device: on, wait, then off.
-    do_on_result, do_off_result = dobot.SendDOPulse(
-        trigger_do_index,
-        trigger_pulse_seconds,
     )
     print("RelMovLUser:", move_result)
     if not dobot.WaitCommandDone(move_result):
