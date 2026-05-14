@@ -1,9 +1,10 @@
 from .dobot import Dobot
-from .robot_control import (
+from .dobot_control import (
     calculate_step_count,
     connect_robot,
     disconnect_robot,
     enable_robot,
+    get_robot_error,
     has_robot_error,
     initialize_robot,
     move_linear_point,
@@ -14,6 +15,7 @@ from .robot_control import (
     send_do_pulse,
     set_robot_speed,
     start_feedback,
+    stop_and_return,
     turn_do_off,
 )
 
@@ -23,6 +25,7 @@ __all__ = [
     "connect_robot",
     "disconnect_robot",
     "enable_robot",
+    "get_robot_error",
     "has_robot_error",
     "initialize_robot",
     "move_linear_point",
@@ -33,5 +36,6 @@ __all__ = [
     "send_do_pulse",
     "set_robot_speed",
     "start_feedback",
+    "stop_and_return",
     "turn_do_off",
 ]

@@ -98,6 +98,33 @@ def has_robot_error(dobot):
     return True
 
 
+def get_robot_error(dobot):
+    error_result = dobot.dashboard.GetErrorID()
+    print("GetErrorID:", error_result)
+
+    result_ids = dobot.parseResultId(error_result)
+    if not result_ids or result_ids[0] != 0:
+        print("Failed to read Dobot error ID")
+        return result_ids
+
+    error_ids = result_ids[1:]
+    if not error_ids:
+        print("Dobot has no active errors")
+        return []
+
+    print("Dobot active error IDs:", error_ids)
+    print("GetError:", dobot.dashboard.GetError("en"))
+    return error_ids
+
+
+def stop_and_return(dobot, saved_pose, speed_ratio, do_index=None):
+    if get_robot_error(dobot):
+        print("Dobot error detected. Stop and return to saved pose.")
+
+    do_indexes = [] if do_index is None else [do_index]
+    return_to_pose(dobot, saved_pose, speed_ratio, do_indexes=do_indexes)
+
+
 def command_succeeded(dobot, command_name, result):
     print(f"{command_name}:", result)
     result_ids = dobot.parseResultId(result)

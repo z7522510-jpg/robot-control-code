@@ -3,8 +3,10 @@ from time import sleep
 
 from Dobot import (
     calculate_step_count,
+    get_robot_error,
     initialize_robot,
     run_step,
+    stop_and_return,
     turn_do_off,
 )
 from Laser import connect_laser
@@ -77,6 +79,16 @@ def ask_loop_wavelengths():
     return wavelengths
 
 
+def stop_laser_and_return(laser, dobot, saved_start_pose):
+    laser.stop_safely()
+    stop_and_return(
+        dobot,
+        saved_start_pose,
+        config.SPEED_RATIO,
+        do_index=config.TRIGGER_DO_INDEX,
+    )
+
+
 def run_experiment():
     laser, dobot, feed_thread, saved_start_pose = initialize()
     ask_robot_step()
@@ -87,16 +99,28 @@ def run_experiment():
     print("Step count:", step_count)
 
     try:
+        if get_robot_error(dobot):
+            stop_laser_and_return(laser, dobot, saved_start_pose)
+            return laser, dobot, feed_thread, saved_start_pose
+
         laser.run()
         print("Laser RUN")
         sleep(5)
 
         for loop_index, wavelength in enumerate(loop_wavelengths, start=1):
+            if get_robot_error(dobot):
+                stop_laser_and_return(laser, dobot, saved_start_pose)
+                return laser, dobot, feed_thread, saved_start_pose
+
             print(f"Loop {loop_index}/{len(loop_wavelengths)}")
             laser.set_wavelength(wavelength)
             sleep(2)
 
             for step_index in range(1, step_count + 1):
+                if get_robot_error(dobot):
+                    stop_laser_and_return(laser, dobot, saved_start_pose)
+                    return laser, dobot, feed_thread, saved_start_pose
+
                 run_step(
                     dobot,
                     step_index,
@@ -106,6 +130,10 @@ def run_experiment():
                     config.TRIGGER_DO_INDEX,
                     config.TRIGGER_PULSE_SECONDS,
                 )
+
+                if get_robot_error(dobot):
+                    stop_laser_and_return(laser, dobot, saved_start_pose)
+                    return laser, dobot, feed_thread, saved_start_pose
 
             turn_do_off(dobot, config.TRIGGER_DO_INDEX)
             dobot.MoveLinearPoint(saved_start_pose, config.SPEED_RATIO)

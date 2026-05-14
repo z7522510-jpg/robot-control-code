@@ -1,12 +1,16 @@
-import ast
 import contextlib
-import math
+import json
 import queue
 import threading
 import tkinter as tk
+from pathlib import Path
 from tkinter import messagebox, ttk
 
 import config
+
+
+DIRECTIONS = ("x+", "x-", "y+", "y-", "z+", "z-")
+SETTINGS_PATH = Path(__file__).with_name("ui_settings.json")
 
 
 class QueueWriter:
@@ -25,10 +29,12 @@ class ExperimentGui(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Dobot Laser Experiment")
-        self.geometry("760x620")
+        self.geometry("780x680")
 
-        self.dobot = None
         self.laser = None
+        self.dobot = None
+        self.feed_thread = None
+        self.saved_start_pose = None
         self.initialized = False
         self.worker = None
         self.loop_wavelengths = []
@@ -41,6 +47,7 @@ class ExperimentGui(tk.Tk):
 
         self.inputs = {}
         self.wavelength_entries = []
+        self.settings = self._load_settings()
 
         self._build_form()
         self._build_wavelengths()
@@ -51,6 +58,30 @@ class ExperimentGui(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.after(100, self._drain_log)
 
+    def _load_settings(self):
+        if not SETTINGS_PATH.exists():
+            return {}
+        try:
+            with SETTINGS_PATH.open("r", encoding="utf-8") as file:
+                return json.load(file)
+        except Exception:
+            return {}
+
+    def _save_settings(self, wavelengths):
+        settings = {
+            "SPEED_RATIO": self.inputs["SPEED_RATIO"].get(),
+            "TOTAL_DISTANCE_MM": self.inputs["TOTAL_DISTANCE_MM"].get(),
+            "STEP_DISTANCE_MM": self.inputs["STEP_DISTANCE_MM"].get(),
+            "STEP_WAIT_SECONDS": self.inputs["STEP_WAIT_SECONDS"].get(),
+            "TRIGGER_DO_INDEX": self.inputs["TRIGGER_DO_INDEX"].get(),
+            "TRIGGER_PULSE_SECONDS": self.inputs["TRIGGER_PULSE_SECONDS"].get(),
+            "LOOP_REPEAT_COUNT": self.inputs["LOOP_REPEAT_COUNT"].get(),
+            "DIRECTION": self.direction_box.get(),
+            "WAVELENGTHS": [str(wavelength) for wavelength in wavelengths],
+        }
+        with SETTINGS_PATH.open("w", encoding="utf-8") as file:
+            json.dump(settings, file, indent=2)
+
     def _build_form(self):
         frame = ttk.LabelFrame(self, text="Experiment Parameters", padding=12)
         frame.pack(fill="x", padx=12, pady=10)
@@ -58,8 +89,10 @@ class ExperimentGui(tk.Tk):
         fields = [
             ("Speed Ratio", "SPEED_RATIO", config.SPEED_RATIO),
             ("Total Distance mm", "TOTAL_DISTANCE_MM", config.TOTAL_DISTANCE_MM),
-            ("Step Offset XYZ mm", "STEP_OFFSET_MM", config.STEP_OFFSET_MM),
+            ("Step Distance mm", "STEP_DISTANCE_MM", config.STEP_DISTANCE_MM),
             ("Step Wait Seconds", "STEP_WAIT_SECONDS", config.STEP_WAIT_SECONDS),
+            ("Trigger DO Index", "TRIGGER_DO_INDEX", config.TRIGGER_DO_INDEX),
+            ("Trigger Pulse Seconds", "TRIGGER_PULSE_SECONDS", config.TRIGGER_PULSE_SECONDS),
             ("Loop Repeat Count", "LOOP_REPEAT_COUNT", config.LOOP_REPEAT_COUNT),
         ]
 
@@ -67,11 +100,17 @@ class ExperimentGui(tk.Tk):
             ttk.Label(frame, text=label).grid(row=row, column=0, sticky="w", pady=4)
             entry = ttk.Entry(frame, width=34)
             if key == "LOOP_REPEAT_COUNT":
+                self.loop_count_var.set(str(self.settings.get(key, value)))
                 entry.configure(textvariable=self.loop_count_var)
             else:
-                entry.insert(0, str(value))
+                entry.insert(0, str(self.settings.get(key, value)))
             entry.grid(row=row, column=1, sticky="ew", pady=4)
             self.inputs[key] = entry
+
+        ttk.Label(frame, text="Direction").grid(row=len(fields), column=0, sticky="w", pady=4)
+        self.direction_box = ttk.Combobox(frame, values=DIRECTIONS, state="readonly", width=31)
+        self.direction_box.set(self.settings.get("DIRECTION", self._default_direction()))
+        self.direction_box.grid(row=len(fields), column=1, sticky="ew", pady=4)
 
         frame.columnconfigure(1, weight=1)
 
@@ -84,29 +123,10 @@ class ExperimentGui(tk.Tk):
         frame = ttk.Frame(self, padding=(12, 0))
         frame.pack(fill="x")
 
-        self.init_button = ttk.Button(
-            frame,
-            text="Initialize Robot and Laser",
-            command=self.initialize_devices,
-        )
-        self.start_button = ttk.Button(
-            frame,
-            text="Start Experiment",
-            command=self.start_experiment,
-            state="disabled",
-        )
-        self.stop_button = ttk.Button(
-            frame,
-            text="Stop",
-            command=self.stop_experiment,
-            state="disabled",
-        )
-        self.return_button = ttk.Button(
-            frame,
-            text="Return To Start",
-            command=self.return_to_start,
-            state="disabled",
-        )
+        self.init_button = ttk.Button(frame, text="Initialize Robot and Laser", command=self.initialize_devices)
+        self.start_button = ttk.Button(frame, text="Start Experiment", command=self.start_experiment, state="disabled")
+        self.stop_button = ttk.Button(frame, text="Stop", command=self.stop_experiment, state="disabled")
+        self.return_button = ttk.Button(frame, text="Return To Start", command=self.return_to_start, state="disabled")
 
         self.init_button.pack(side="left", padx=(0, 8))
         self.start_button.pack(side="left", padx=(0, 8))
@@ -120,15 +140,25 @@ class ExperimentGui(tk.Tk):
         self.log_text = tk.Text(frame, height=16, wrap="word")
         scrollbar = ttk.Scrollbar(frame, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scrollbar.set)
-
         self.log_text.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+
+    def _default_direction(self):
+        offset = config.STEP_OFFSET_MM
+        if abs(offset[0]) > 0:
+            return "x+" if offset[0] > 0 else "x-"
+        if abs(offset[1]) > 0:
+            return "y+" if offset[1] > 0 else "y-"
+        if abs(offset[2]) > 0:
+            return "z+" if offset[2] > 0 else "z-"
+        return "x-"
 
     def _schedule_wavelength_update(self, *_args):
         self.after_idle(self._update_wavelength_entries)
 
     def _update_wavelength_entries(self):
         old_values = [entry.get() for entry in self.wavelength_entries]
+        saved_values = self.settings.get("WAVELENGTHS", [])
         try:
             loop_count = int(float(self.loop_count_var.get()))
         except ValueError:
@@ -141,7 +171,12 @@ class ExperimentGui(tk.Tk):
         self.wavelength_entries = []
 
         for index in range(loop_count):
-            value = old_values[index] if index < len(old_values) else str(config.LASER_WAVELENGTH_NM)
+            if index < len(old_values):
+                value = old_values[index]
+            elif index < len(saved_values):
+                value = saved_values[index]
+            else:
+                value = str(config.LASER_WAVELENGTH_NM)
             ttk.Label(self.wavelength_frame, text=f"Loop {index + 1} Wavelength nm").grid(
                 row=index,
                 column=0,
@@ -156,38 +191,56 @@ class ExperimentGui(tk.Tk):
         self.wavelength_frame.columnconfigure(1, weight=1)
 
     def read_parameters(self):
-        offset = ast.literal_eval(self.inputs["STEP_OFFSET_MM"].get())
-        if not isinstance(offset, (list, tuple)) or len(offset) != 3:
-            raise ValueError("Step Offset XYZ mm must look like [0, -2, 0]")
-
         speed_ratio = int(float(self.inputs["SPEED_RATIO"].get()))
         total_distance = float(self.inputs["TOTAL_DISTANCE_MM"].get())
-        step_offset = [float(value) for value in offset]
+        step_distance = float(self.inputs["STEP_DISTANCE_MM"].get())
         step_wait = float(self.inputs["STEP_WAIT_SECONDS"].get())
+        do_index = int(float(self.inputs["TRIGGER_DO_INDEX"].get()))
+        pulse_seconds = float(self.inputs["TRIGGER_PULSE_SECONDS"].get())
         loop_count = int(float(self.inputs["LOOP_REPEAT_COUNT"].get()))
+        direction = self.direction_box.get()
         wavelengths = [float(entry.get()) for entry in self.wavelength_entries]
 
         if speed_ratio <= 0:
             raise ValueError("Speed Ratio must be greater than 0")
         if total_distance <= 0:
             raise ValueError("Total Distance mm must be greater than 0")
-        if math.sqrt(sum(value * value for value in step_offset)) <= 1e-12:
-            raise ValueError("Step Offset XYZ mm must include movement")
+        if step_distance <= 0:
+            raise ValueError("Step Distance mm must be greater than 0")
         if step_wait < 0:
             raise ValueError("Step Wait Seconds cannot be negative")
+        if do_index <= 0:
+            raise ValueError("Trigger DO Index must be greater than 0")
+        if pulse_seconds <= 0:
+            raise ValueError("Trigger Pulse Seconds must be greater than 0")
         if loop_count <= 0:
             raise ValueError("Loop Repeat Count must be greater than 0")
         if len(wavelengths) != loop_count:
             raise ValueError("Loop wavelength count must match Loop Repeat Count")
         if any(wavelength <= 0 for wavelength in wavelengths):
             raise ValueError("Each loop wavelength must be greater than 0")
+        if direction not in DIRECTIONS:
+            raise ValueError("Direction must be one of x+/x-/y+/y-/z+/z-")
+
+        offsets = {
+            "x+": [step_distance, 0, 0],
+            "x-": [-step_distance, 0, 0],
+            "y+": [0, step_distance, 0],
+            "y-": [0, -step_distance, 0],
+            "z+": [0, 0, step_distance],
+            "z-": [0, 0, -step_distance],
+        }
 
         config.SPEED_RATIO = speed_ratio
         config.TOTAL_DISTANCE_MM = total_distance
-        config.STEP_OFFSET_MM = step_offset
+        config.STEP_DISTANCE_MM = step_distance
+        config.STEP_OFFSET_MM = offsets[direction]
         config.STEP_WAIT_SECONDS = step_wait
+        config.TRIGGER_DO_INDEX = do_index
+        config.TRIGGER_PULSE_SECONDS = pulse_seconds
         config.LOOP_REPEAT_COUNT = loop_count
         config.LASER_WAVELENGTH_NM = wavelengths[0]
+        self._save_settings(wavelengths)
         return wavelengths
 
     def initialize_devices(self):
@@ -208,19 +261,9 @@ class ExperimentGui(tk.Tk):
     def _initialize_devices(self):
         try:
             with contextlib.redirect_stdout(QueueWriter(self.log_queue)):
-                import experiment
-                from Dobot import initialize_robot
-                from Laser import connect_laser
+                import experiment1
 
-                self.dobot, _feed_thread, _original_pose = initialize_robot(
-                    config.DOBOT_IP,
-                    config.SPEED_RATIO,
-                    dobot=self.dobot,
-                )
-
-                if self.laser is None:
-                    self.laser = connect_laser(config.LASER_DLL_PATH)
-                self.laser.initialize_laser(config.LASER_WAVELENGTH_NM)
+                self.laser, self.dobot, self.feed_thread, self.saved_start_pose = experiment1.initialize()
 
             self.initialized = True
             self.log_queue.put("Robot and laser initialization complete")
@@ -248,22 +291,13 @@ class ExperimentGui(tk.Tk):
         self.return_event.clear()
         self.log("Starting experiment")
         self._set_running(True)
-
         self.worker = threading.Thread(target=self._run_experiment, daemon=True)
         self.worker.start()
 
     def _run_experiment(self):
         try:
             with contextlib.redirect_stdout(QueueWriter(self.log_queue)):
-                import experiment
-
-                experiment.run_initialized_experiment(
-                    dobot=self.dobot,
-                    laser=self.laser,
-                    loop_wavelengths=self.loop_wavelengths,
-                    stop_event=self.stop_event,
-                    return_event=self.return_event,
-                )
+                self._run_experiment1_flow()
         except ModuleNotFoundError as error:
             self._log_missing_module(error)
         except Exception as error:
@@ -271,6 +305,83 @@ class ExperimentGui(tk.Tk):
         finally:
             self.log_queue.put("Experiment finished")
             self.log_queue.put(self.done_token)
+
+    def _run_experiment1_flow(self):
+        import experiment1
+        from Dobot import calculate_step_count, get_robot_error, run_step, turn_do_off
+
+        step_count = calculate_step_count(config.TOTAL_DISTANCE_MM, config.STEP_DISTANCE_MM)
+        print("Step count:", step_count)
+
+        try:
+            if get_robot_error(self.dobot):
+                experiment1.stop_laser_and_return(self.laser, self.dobot, self.saved_start_pose)
+                return
+
+            self.laser.run()
+            print("Laser RUN")
+            if self._wait_or_stop(5):
+                return
+
+            for loop_index, wavelength in enumerate(self.loop_wavelengths, start=1):
+                if self._should_stop_or_return():
+                    return
+                if get_robot_error(self.dobot):
+                    experiment1.stop_laser_and_return(self.laser, self.dobot, self.saved_start_pose)
+                    return
+
+                print(f"Loop {loop_index}/{len(self.loop_wavelengths)}")
+                self.laser.set_wavelength(wavelength)
+                if self._wait_or_stop(2):
+                    return
+
+                for step_index in range(1, step_count + 1):
+                    if self._should_stop_or_return():
+                        return
+                    if get_robot_error(self.dobot):
+                        experiment1.stop_laser_and_return(self.laser, self.dobot, self.saved_start_pose)
+                        return
+
+                    run_step(
+                        self.dobot,
+                        step_index,
+                        config.STEP_OFFSET_MM,
+                        config.SPEED_RATIO,
+                        config.STEP_WAIT_SECONDS,
+                        config.TRIGGER_DO_INDEX,
+                        config.TRIGGER_PULSE_SECONDS,
+                    )
+
+                    if get_robot_error(self.dobot):
+                        experiment1.stop_laser_and_return(self.laser, self.dobot, self.saved_start_pose)
+                        return
+
+                turn_do_off(self.dobot, config.TRIGGER_DO_INDEX)
+                self.dobot.MoveLinearPoint(self.saved_start_pose, config.SPEED_RATIO)
+                if self._wait_or_stop(2):
+                    return
+        finally:
+            self.laser.stop_safely()
+
+    def _wait_or_stop(self, seconds):
+        if self.stop_event.wait(seconds):
+            self.laser.stop_safely()
+            return True
+        return False
+
+    def _should_stop_or_return(self):
+        if self.return_event.is_set():
+            import experiment1
+
+            experiment1.stop_laser_and_return(self.laser, self.dobot, self.saved_start_pose)
+            return True
+        if self.stop_event.is_set():
+            from Dobot import turn_do_off
+
+            self.laser.stop_safely()
+            turn_do_off(self.dobot, config.TRIGGER_DO_INDEX)
+            return True
+        return False
 
     def stop_experiment(self):
         self.log("Stop requested")
