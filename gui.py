@@ -318,11 +318,6 @@ class ExperimentGui(tk.Tk):
                 experiment1.stop_laser_and_return(self.laser, self.dobot, self.saved_start_pose)
                 return
 
-            self._ensure_at_saved_start()
-
-            # Keep GUI behavior aligned with experiment1.py.
-            self.dobot.SetTool(config.TOOL_INDEX, config.TOOL_FRAME)
-
             self.laser.run()
             print("Laser RUN")
             if self._wait_or_stop(5):
@@ -362,44 +357,11 @@ class ExperimentGui(tk.Tk):
                         return
 
                 turn_do_off(self.dobot, config.TRIGGER_DO_INDEX)
-                self._move_to_saved_start()
+                self.dobot.MoveLinearPoint(self.saved_start_pose, config.SPEED_RATIO)
                 if self._wait_or_stop(2):
                     return
         finally:
             self.laser.stop_safely()
-
-    def _pose_delta(self, pose_a, pose_b):
-        return [b - a for a, b in zip(pose_a, pose_b)]
-
-    def _move_to_saved_start(self):
-        if self.saved_start_pose is None:
-            raise RuntimeError("No saved start pose. Initialize before starting experiment.")
-
-        print("Returning to saved start pose:", self.saved_start_pose)
-        self.dobot.MoveLinearPoint(self.saved_start_pose, config.SPEED_RATIO)
-        current_pose = self.dobot.GetCurrentPose()
-        print("Returned current pose:", current_pose)
-        print("Return delta pose:", self._pose_delta(self.saved_start_pose, current_pose))
-        return current_pose
-
-    def _ensure_at_saved_start(self, position_tolerance=0.2, rotation_tolerance=0.2):
-        if self.saved_start_pose is None:
-            raise RuntimeError("No saved start pose. Initialize before starting experiment.")
-
-        current_pose = self.dobot.GetCurrentPose()
-        delta_pose = self._pose_delta(self.saved_start_pose, current_pose)
-        max_position_delta = max(abs(value) for value in delta_pose[:3])
-        max_rotation_delta = max(abs(value) for value in delta_pose[3:])
-
-        print("Saved start pose:", self.saved_start_pose)
-        print("Current pose before run:", current_pose)
-        print("Start delta pose:", delta_pose)
-
-        if max_position_delta <= position_tolerance and max_rotation_delta <= rotation_tolerance:
-            return current_pose
-
-        print("Current pose is not at saved start. Returning before starting experiment.")
-        return self._move_to_saved_start()
 
     def _wait_or_stop(self, seconds):
         if self.stop_event.wait(seconds):
