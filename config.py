@@ -7,6 +7,9 @@ LASER_WAVELENGTH_NM = 670
 TRIGGER_DO_INDEX = 1
 TRIGGER_PULSE_SECONDS = 0.025
 
+TOOL_INDEX = 1
+TOOL_FRAME = "{0,0,0,0,0,0}"
+
 STEP_DISTANCE_MM = .5
 # Per-step scan movement vector in XYZ, in millimeters: [dx, dy, dz].
 # Use one non-zero value for axis-aligned scans, or multiple values for angled scans.

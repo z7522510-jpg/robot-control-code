@@ -1,4 +1,7 @@
 from .dobot import Dobot
+
+SetTool = Dobot.SetTool
+
 from .dobot_control import (
     calculate_step_count,
     connect_robot,
@@ -21,6 +24,7 @@ from .dobot_control import (
 
 __all__ = [
     "Dobot",
+    "SetTool",
     "calculate_step_count",
     "connect_robot",
     "disconnect_robot",

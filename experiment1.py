@@ -103,6 +103,9 @@ def run_experiment():
             stop_laser_and_return(laser, dobot, saved_start_pose)
             return laser, dobot, feed_thread, saved_start_pose
 
+        # Set tool coordinates.
+        dobot.SetTool(config.TOOL_INDEX, config.TOOL_FRAME)
+
         laser.run()
         print("Laser RUN")
         sleep(5)

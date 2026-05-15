@@ -36,6 +36,11 @@ class Dobot:
         self.dashboard = DobotApiDashboard(self.ip, self.dashboardPort)
         self.feedFour = DobotApiFeedBack(self.ip, self.feedPortFour)
 
+    def SetTool(self, index, tool_frame):
+        result = self.dashboard.SetTool(index, tool_frame)
+        print(f"SetTool({index},{tool_frame}):", result)
+        return result
+
     def GetFeed(self):
         # 获取机器人状态
         while True:
