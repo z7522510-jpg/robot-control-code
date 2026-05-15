@@ -1,7 +1,6 @@
 import config
 
-from Dobot import initialize_robot
-from Laser import connect_laser
+from Dobot import get_robot_error, initialize_robot
 
 
 # Pose format: [x, y, z, rx, ry, rz]
@@ -15,25 +14,28 @@ WANTED_POSE = [
 ]
 
 
-# Initialize laser and Dobot.
+# Initialize Dobot.
 def initialize():
-    laser = connect_laser(config.LASER_DLL_PATH)
-    laser.initialize_laser(config.LASER_WAVELENGTH_NM)
-
     dobot, feed_thread, saved_start_pose = initialize_robot(
         config.DOBOT_IP,
         config.SPEED_RATIO,
     )
 
-    return laser, dobot, feed_thread, saved_start_pose
+    return dobot, feed_thread, saved_start_pose
 
 
 def run_experiment():
-    laser, dobot, feed_thread, saved_start_pose = initialize()
+    dobot, feed_thread, saved_start_pose = initialize()
+
+    if get_robot_error(dobot):
+        return dobot, feed_thread, saved_start_pose
+
+    # Set tool coordinates.
+    dobot.SetTool(config.TOOL_INDEX, config.TOOL_FRAME)
 
     dobot.MoveLinearPoint(WANTED_POSE, config.SPEED_RATIO)
 
-    return laser, dobot, feed_thread, saved_start_pose
+    return dobot, feed_thread, saved_start_pose
 
 
 if __name__ == "__main__":
