@@ -41,6 +41,13 @@ class Dobot:
         print(f"SetTool({index},{tool_frame}):", result)
         return result
 
+    def ActivateTool(self, index):
+        # SetTool only writes the tool definition; Tool() activates it as the
+        # global tool frame so motion and GetPose actually use the offset.
+        result = self.dashboard.Tool(index)
+        print(f"Tool({index}):", result)
+        return result
+
     def GetFeed(self):
         # 获取机器人状态
         while True:
