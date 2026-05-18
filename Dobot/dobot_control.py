@@ -32,7 +32,7 @@ def run_step(
         0,
         0,
         0,
-        v=speed_ratio,
+        speed=10,
     )
     # Send one DO pulse to the external device: on, wait, then off.
     do_on_result, do_off_result = dobot.SendDOPulse(
