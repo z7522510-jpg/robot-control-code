@@ -145,7 +145,9 @@ class Dobot:
                 )
                 return False
 
-            sleep(0.1)
+            # Poll at 5 ms so "motion done" is detected promptly. Larger
+            # values add up to that much latency per move/step.
+            sleep(0.005)
 
     def GenerateXZArcPoints(self, center, radius=100):
         return [
