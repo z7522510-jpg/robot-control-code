@@ -134,9 +134,11 @@ def run_experiment():
                     config.TRIGGER_PULSE_SECONDS,
                 )
 
-                if get_robot_error(dobot):
-                    stop_laser_and_return(laser, dobot, saved_start_pose)
-                    return laser, dobot, feed_thread, saved_start_pose
+            # One error check after the whole scan loop (covers the last step
+            # too); the per-step check is at the top of the next iteration.
+            if get_robot_error(dobot):
+                stop_laser_and_return(laser, dobot, saved_start_pose)
+                return laser, dobot, feed_thread, saved_start_pose
 
             turn_do_off(dobot, config.TRIGGER_DO_INDEX)
             dobot.MoveLinearPoint(saved_start_pose, config.SPEED_RATIO)

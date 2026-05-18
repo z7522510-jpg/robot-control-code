@@ -352,9 +352,11 @@ class ExperimentGui(tk.Tk):
                         config.TRIGGER_PULSE_SECONDS,
                     )
 
-                    if get_robot_error(self.dobot):
-                        experiment1.stop_laser_and_return(self.laser, self.dobot, self.saved_start_pose)
-                        return
+                # One error check after the whole scan loop (covers the last
+                # step too); the per-step check is at the top of the next loop.
+                if get_robot_error(self.dobot):
+                    experiment1.stop_laser_and_return(self.laser, self.dobot, self.saved_start_pose)
+                    return
 
                 turn_do_off(self.dobot, config.TRIGGER_DO_INDEX)
                 self.dobot.MoveLinearPoint(self.saved_start_pose, config.SPEED_RATIO)
@@ -363,28 +365,42 @@ class ExperimentGui(tk.Tk):
         finally:
             self.laser.stop_safely()
 
+    def _abort_and_return(self):
+        # Stop the laser and move the robot back to the saved start pose.
+        # Used by Stop, Return To Start, and window close.
+        #
+        # Abort is only processed between steps / during waits, so the robot is
+        # idle here. Use a direct MovL (same as the end-of-loop return) instead
+        # of stop_and_return: this firmware rejects MovL right after Stop().
+        if self.laser is not None:
+            try:
+                self.laser.stop_safely()
+            except Exception:
+                pass
+        if self.dobot is not None and self.saved_start_pose is not None:
+            from Dobot import turn_do_off
+
+            try:
+                turn_do_off(self.dobot, config.TRIGGER_DO_INDEX)
+            except Exception:
+                pass
+            self.dobot.MoveLinearPoint(self.saved_start_pose, config.SPEED_RATIO)
+
     def _wait_or_stop(self, seconds):
         if self.stop_event.wait(seconds):
-            self.laser.stop_safely()
+            self._abort_and_return()
             return True
         return False
 
     def _should_stop_or_return(self):
-        if self.return_event.is_set():
-            import experiment1
-
-            experiment1.stop_laser_and_return(self.laser, self.dobot, self.saved_start_pose)
-            return True
-        if self.stop_event.is_set():
-            from Dobot import turn_do_off
-
-            self.laser.stop_safely()
-            turn_do_off(self.dobot, config.TRIGGER_DO_INDEX)
+        # Stop and Return To Start both return the robot to the start pose.
+        if self.return_event.is_set() or self.stop_event.is_set():
+            self._abort_and_return()
             return True
         return False
 
     def stop_experiment(self):
-        self.log("Stop requested")
+        self.log("Stop requested - laser off and returning to start pose")
         self.stop_event.set()
 
     def return_to_start(self):
@@ -432,7 +448,18 @@ class ExperimentGui(tk.Tk):
         self.after(100, self._drain_log)
 
     def on_close(self):
+        # Ask any running experiment to stop and return to the start pose,
+        # then wait for it to finish before disconnecting.
         self.stop_event.set()
+        self.return_event.set()
+        if self.worker is not None and self.worker.is_alive():
+            self.worker.join(timeout=120)
+        elif self.dobot is not None and self.saved_start_pose is not None:
+            # No experiment running: return to start directly before cleanup.
+            try:
+                self._abort_and_return()
+            except Exception:
+                pass
         if self.laser is not None:
             try:
                 self.laser.close()
