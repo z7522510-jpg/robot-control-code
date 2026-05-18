@@ -1,8 +1,10 @@
 import contextlib
+import json
 import queue
 import threading
 import time
 import tkinter as tk
+from pathlib import Path
 from tkinter import messagebox, ttk
 
 import config
@@ -11,6 +13,7 @@ from Dobot import calculate_step_count, disconnect_robot, get_robot_error, run_s
 
 
 DIRECTIONS = ("x+", "x-", "y+", "y-", "z+", "z-")
+SETTINGS_PATH = Path(__file__).with_name("ui_settings.json")
 
 
 class ExperimentGui(tk.Tk):
@@ -34,6 +37,9 @@ class ExperimentGui(tk.Tk):
         self.return_event = threading.Event()
 
         self.inputs = {}
+        self.settings = self._load_settings()
+        self.loop_count_var = tk.StringVar(value=str(config.LOOP_REPEAT_COUNT))
+        self.wavelength_entries = []
         self.build_ui()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.after(100, self.drain_log)
@@ -50,21 +56,33 @@ class ExperimentGui(tk.Tk):
             ("Step Wait Seconds", "STEP_WAIT_SECONDS", config.STEP_WAIT_SECONDS),
             ("Trigger DO Index", "TRIGGER_DO_INDEX", config.TRIGGER_DO_INDEX),
             ("Trigger Pulse Seconds", "TRIGGER_PULSE_SECONDS", config.TRIGGER_PULSE_SECONDS),
-            ("Wavelengths nm", "WAVELENGTHS", str(config.LASER_WAVELENGTH_NM)),
+            ("Loop Repeat Count", "LOOP_REPEAT_COUNT", config.LOOP_REPEAT_COUNT),
         ]
 
         for row, (label, key, value) in enumerate(fields):
             ttk.Label(form, text=label).grid(row=row, column=0, sticky="w", pady=4)
             entry = ttk.Entry(form, width=34)
-            entry.insert(0, str(value))
+            saved = self.settings.get(key, value)
+            if key == "LOOP_REPEAT_COUNT":
+                self.loop_count_var.set(str(saved))
+                entry.configure(textvariable=self.loop_count_var)
+            else:
+                entry.insert(0, str(saved))
             entry.grid(row=row, column=1, sticky="ew", pady=4)
             self.inputs[key] = entry
 
         ttk.Label(form, text="Direction").grid(row=len(fields), column=0, sticky="w", pady=4)
         self.direction_box = ttk.Combobox(form, values=DIRECTIONS, state="readonly", width=31)
-        self.direction_box.set(self.default_direction())
+        self.direction_box.set(self.settings.get("DIRECTION", self.default_direction()))
         self.direction_box.grid(row=len(fields), column=1, sticky="ew", pady=4)
         form.columnconfigure(1, weight=1)
+
+        self.wavelength_frame = ttk.LabelFrame(self, text="Loop Wavelengths", padding=12)
+        self.wavelength_frame.pack(fill="x", padx=12, pady=(0, 10))
+        self.update_wavelength_entries()
+        self.loop_count_var.trace_add(
+            "write", lambda *_: self.after_idle(self.update_wavelength_entries)
+        )
 
         buttons = ttk.Frame(self, padding=(12, 0))
         buttons.pack(fill="x")
@@ -96,6 +114,55 @@ class ExperimentGui(tk.Tk):
             return "z+" if offset[2] > 0 else "z-"
         return "x-"
 
+    def _load_settings(self):
+        try:
+            with SETTINGS_PATH.open("r", encoding="utf-8") as file:
+                return json.load(file)
+        except Exception:
+            return {}
+
+    def _save_settings(self):
+        settings = {key: entry.get() for key, entry in self.inputs.items()}
+        settings["DIRECTION"] = self.direction_box.get()
+        settings["WAVELENGTHS"] = [entry.get() for entry in self.wavelength_entries]
+        try:
+            with SETTINGS_PATH.open("w", encoding="utf-8") as file:
+                json.dump(settings, file, indent=2)
+        except Exception:
+            pass
+
+    def update_wavelength_entries(self):
+        # Rebuild one wavelength entry per loop when Loop Repeat Count changes.
+        # Existing typed values are preserved by position.
+        try:
+            loop_count = int(float(self.loop_count_var.get()))
+        except (ValueError, tk.TclError):
+            return
+        if loop_count <= 0 or loop_count > 100:
+            return
+
+        old_values = [entry.get() for entry in self.wavelength_entries]
+        saved_wavelengths = self.settings.get("WAVELENGTHS", [])
+        for child in self.wavelength_frame.winfo_children():
+            child.destroy()
+        self.wavelength_entries = []
+
+        for index in range(loop_count):
+            if index < len(old_values):
+                value = old_values[index]
+            elif index < len(saved_wavelengths):
+                value = saved_wavelengths[index]
+            else:
+                value = str(config.LASER_WAVELENGTH_NM)
+            ttk.Label(self.wavelength_frame, text=f"Loop {index + 1} Wavelength nm").grid(
+                row=index, column=0, sticky="w", pady=3
+            )
+            entry = ttk.Entry(self.wavelength_frame, width=34)
+            entry.insert(0, value)
+            entry.grid(row=index, column=1, sticky="ew", pady=3)
+            self.wavelength_entries.append(entry)
+        self.wavelength_frame.columnconfigure(1, weight=1)
+
     def read_parameters(self):
         speed_ratio = int(float(self.inputs["SPEED_RATIO"].get()))
         total_distance = float(self.inputs["TOTAL_DISTANCE_MM"].get())
@@ -104,11 +171,11 @@ class ExperimentGui(tk.Tk):
         step_wait = float(self.inputs["STEP_WAIT_SECONDS"].get())
         do_index = int(float(self.inputs["TRIGGER_DO_INDEX"].get()))
         pulse_seconds = float(self.inputs["TRIGGER_PULSE_SECONDS"].get())
-        wavelengths = [
-            float(value.strip())
-            for value in self.inputs["WAVELENGTHS"].get().split(",")
-            if value.strip()
-        ]
+        try:
+            loop_count = int(float(self.loop_count_var.get()))
+        except ValueError:
+            raise ValueError("Loop Repeat Count must be a number")
+        wavelengths = [float(entry.get().strip()) for entry in self.wavelength_entries]
         direction = self.direction_box.get()
 
         if speed_ratio <= 0:
@@ -125,8 +192,10 @@ class ExperimentGui(tk.Tk):
             raise ValueError("Trigger DO Index must be greater than 0")
         if pulse_seconds <= 0:
             raise ValueError("Trigger Pulse Seconds must be greater than 0")
-        if not wavelengths:
-            raise ValueError("Enter at least one wavelength")
+        if loop_count <= 0:
+            raise ValueError("Loop Repeat Count must be greater than 0")
+        if len(wavelengths) != loop_count:
+            raise ValueError("Loop wavelength count must match Loop Repeat Count")
         if any(wavelength <= 0 for wavelength in wavelengths):
             raise ValueError("Each wavelength must be greater than 0")
         if direction not in DIRECTIONS:
@@ -152,6 +221,7 @@ class ExperimentGui(tk.Tk):
         config.LOOP_REPEAT_COUNT = len(wavelengths)
         config.LASER_WAVELENGTH_NM = wavelengths[0]
         self.loop_wavelengths = wavelengths
+        self._save_settings()
 
     def initialize_devices(self):
         if self.worker and self.worker.is_alive():
@@ -256,12 +326,13 @@ class ExperimentGui(tk.Tk):
 
     def wait_seconds(self, seconds):
         end_time = time.perf_counter() + seconds
-        while time.perf_counter() < end_time:
-            if self.stop_event.is_set() or self.return_event.is_set():
-                self.return_to_saved_start()
+        while True:
+            if self.stop_or_return_requested():
                 return True
-            time.sleep(min(0.1, end_time - time.perf_counter()))
-        return False
+            remaining = end_time - time.perf_counter()
+            if remaining <= 0:
+                return False
+            time.sleep(min(0.1, remaining))
 
     def stop_or_return_requested(self):
         if self.stop_event.is_set() or self.return_event.is_set():
