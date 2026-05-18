@@ -88,12 +88,6 @@ def stop_laser_and_return(laser, dobot, saved_start_pose):
         do_index=config.TRIGGER_DO_INDEX,
     )
 
-def _check_delta(self):
-    current_pose = self.dobot.GetCurrentPose()
-    delta_pose = current_pose - self.saved_start_pose
-    
-
-
 
 def run_experiment():
     laser, dobot, feed_thread, saved_start_pose = initialize()

@@ -1,6 +1,8 @@
 import threading
 from time import sleep
 
+import config
+
 from .dobot import Dobot
 
 
@@ -32,7 +34,7 @@ def run_step(
         0,
         0,
         0,
-        speed=10,
+        speed=config.STEP_SPEED_MM_S,
     )
     # Send one DO pulse to the external device: on, wait, then off.
     do_on_result, do_off_result = dobot.SendDOPulse(
