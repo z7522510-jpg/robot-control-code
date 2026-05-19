@@ -34,22 +34,19 @@ def run_step(
         0,
         v=speed_ratio,
     )
-    # Send one DO pulse to the external device: on, wait, then off.
-    do_on_result, do_off_result = dobot.SendDOPulse(
-        trigger_do_index,
-        trigger_pulse_seconds,
-    )
+    pulse_ms = max(25, int(round(trigger_pulse_seconds * 1000)))
+    do_result = dobot.dashboard.DO(trigger_do_index, 1, pulse_ms)
     print("RelMovLUser:", move_result)
-    if not dobot.WaitCommandDone(move_result):
-        raise RuntimeError("RelMovLUser failed or timed out")
-
+    print(f"DO({trigger_do_index},1,{pulse_ms}ms):", do_result)
+    # Match the controller script style: queue the move and DO pulse, then wait
+    # a fixed interval instead of waiting for robot idle after every tiny step.
     sleep(step_wait_seconds)
 
     return {
         "step": step_index,
         "signal": f"DO({trigger_do_index},1)->DO({trigger_do_index},0)",
-        "on_result": do_on_result,
-        "off_result": do_off_result,
+        "on_result": do_result,
+        "off_result": do_result,
     }
 
 
