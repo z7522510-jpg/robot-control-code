@@ -312,7 +312,9 @@ class ExperimentGui(tk.Tk):
                             config.TRIGGER_PULSE_SECONDS,
                         )
 
-                    turn_do_off(self.dobot, config.TRIGGER_DO_INDEX)
+                    # No turn_do_off here: the hardware-timed DO pulse
+                    # self-resets, and DO(idx,0) right after the last pulse
+                    # squashed it (the 8th pulse was missing on the scope).
                     self.dobot.MoveLinearPoint(self.saved_start_pose, config.SPEED_RATIO)
                     if self.wait_seconds(2):
                         return

@@ -7,7 +7,6 @@ from Dobot import (
     initialize_robot,
     run_step,
     stop_and_return,
-    turn_do_off,
 )
 from Laser import connect_laser
 
@@ -140,7 +139,9 @@ def run_experiment():
                 stop_laser_and_return(laser, dobot, saved_start_pose)
                 return laser, dobot, feed_thread, saved_start_pose
 
-            turn_do_off(dobot, config.TRIGGER_DO_INDEX)
+            # No turn_do_off here: the hardware-timed DO pulse self-resets,
+            # and calling DO(idx,0) right after the last pulse squashed it
+            # (the 8th pulse was missing on the scope).
             dobot.MoveLinearPoint(saved_start_pose, config.SPEED_RATIO)
             sleep(2)
 
