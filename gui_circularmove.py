@@ -69,7 +69,6 @@ class CircularMoveGui(tk.Tk):
             ("Trigger Pulse Seconds", "TRIGGER_PULSE_SECONDS", config.TRIGGER_PULSE_SECONDS),
             ("Loop Repeat Count", "LOOP_REPEAT_COUNT", config.LOOP_REPEAT_COUNT),
             ("Motion User Index", "CIRCLE_USER_INDEX", config.CIRCLE_USER_INDEX),
-            ("Motion Tool Index", "CIRCLE_TOOL_INDEX", config.CIRCLE_TOOL_INDEX),
             ("Acceleration Ratio", "CIRCLE_ACCELERATION_RATIO", config.CIRCLE_ACCELERATION_RATIO),
             ("Velocity Ratio", "CIRCLE_VELOCITY_RATIO", config.CIRCLE_VELOCITY_RATIO),
             ("CP", "CIRCLE_CP", config.CIRCLE_CP),
@@ -302,7 +301,6 @@ class CircularMoveGui(tk.Tk):
         pulse_seconds = float(self.inputs["TRIGGER_PULSE_SECONDS"].get())
         loop_count = int(float(self.loop_count_var.get()))
         user_index = int(float(self.inputs["CIRCLE_USER_INDEX"].get()))
-        motion_tool_index = int(float(self.inputs["CIRCLE_TOOL_INDEX"].get()))
         acceleration = int(float(self.inputs["CIRCLE_ACCELERATION_RATIO"].get()))
         velocity = int(float(self.inputs["CIRCLE_VELOCITY_RATIO"].get()))
         cp = int(float(self.inputs["CIRCLE_CP"].get()))
@@ -330,8 +328,8 @@ class CircularMoveGui(tk.Tk):
             raise ValueError("Loop wavelength count must match Loop Repeat Count")
         if any(wavelength <= 0 for wavelength in wavelengths):
             raise ValueError("Each wavelength must be greater than 0")
-        if user_index < 0 or motion_tool_index < 0:
-            raise ValueError("User and motion tool indexes cannot be negative")
+        if user_index < 0:
+            raise ValueError("Motion User Index cannot be negative")
         if acceleration <= 0 or velocity <= 0:
             raise ValueError("Acceleration and Velocity must be greater than 0")
         if cp < 0:
@@ -345,7 +343,6 @@ class CircularMoveGui(tk.Tk):
         config.TRIGGER_PULSE_SECONDS = pulse_seconds
         config.LOOP_REPEAT_COUNT = loop_count
         config.CIRCLE_USER_INDEX = user_index
-        config.CIRCLE_TOOL_INDEX = motion_tool_index
         config.CIRCLE_ACCELERATION_RATIO = acceleration
         config.CIRCLE_VELOCITY_RATIO = velocity
         config.CIRCLE_CP = cp
@@ -465,7 +462,7 @@ class CircularMoveGui(tk.Tk):
                             self.dobot,
                             pose,
                             user=config.CIRCLE_USER_INDEX,
-                            tool=config.CIRCLE_TOOL_INDEX,
+                            tool=config.TOOL_INDEX,
                             acceleration=config.CIRCLE_ACCELERATION_RATIO,
                             velocity=config.CIRCLE_VELOCITY_RATIO,
                             cp=config.CIRCLE_CP,
@@ -479,7 +476,7 @@ class CircularMoveGui(tk.Tk):
                         self.dobot,
                         self.initial_pose,
                         user=config.CIRCLE_USER_INDEX,
-                        tool=config.CIRCLE_TOOL_INDEX,
+                        tool=config.TOOL_INDEX,
                         acceleration=config.CIRCLE_ACCELERATION_RATIO,
                         velocity=config.CIRCLE_VELOCITY_RATIO,
                         cp=config.CIRCLE_CP,

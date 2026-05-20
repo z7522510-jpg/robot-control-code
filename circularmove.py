@@ -18,14 +18,29 @@ from experiment1 import ask_loop_wavelengths, ask_pulse, stop_laser_and_return
 
 def initialize():
     laser = connect_laser(config.LASER_DLL_PATH)
-    laser.initialize_laser(config.LASER_WAVELENGTH_NM)
+    try:
+        laser.initialize_laser(config.LASER_WAVELENGTH_NM)
+        dobot, feed_thread, _ = initialize_robot(
+            config.DOBOT_IP,
+            config.SPEED_RATIO,
+        )
 
-    dobot, feed_thread, saved_start_pose = initialize_robot(
-        config.DOBOT_IP,
-        config.SPEED_RATIO,
-    )
+        # Activate the configured tool BEFORE capturing the pose so all
+        # subsequent (x,y,z,rx,ry,rz) values live in the same frame.
+        dobot.SetTool(config.TOOL_INDEX, config.TOOL_FRAME)
+        dobot.ActivateTool(config.TOOL_INDEX)
 
-    initial_pose = get_initial_pose(dobot, saved_start_pose)
+        saved_start_pose = dobot.GetCurrentPose()
+        print("Saved start pose:", saved_start_pose)
+
+        initial_pose = get_initial_pose(dobot, saved_start_pose)
+    except Exception:
+        # Release the laser so the next attempt doesn't see "already connected" (err 17).
+        try:
+            laser.close()
+        except Exception:
+            pass
+        raise
     return laser, dobot, feed_thread, saved_start_pose, initial_pose
 
 
@@ -37,7 +52,7 @@ def get_initial_pose(dobot, saved_start_pose):
         dobot,
         target_pose,
         config.CIRCLE_USER_INDEX,
-        config.CIRCLE_TOOL_INDEX,
+        config.TOOL_INDEX,
         config.CIRCLE_ACCELERATION_RATIO,
         config.CIRCLE_VELOCITY_RATIO,
         config.CIRCLE_CP,
@@ -165,7 +180,7 @@ def run_experiment():
     laser, dobot, feed_thread, saved_start_pose, initial_pose = initialize()
 
     user = config.CIRCLE_USER_INDEX
-    tool = config.CIRCLE_TOOL_INDEX
+    tool = config.TOOL_INDEX
     acceleration = config.CIRCLE_ACCELERATION_RATIO
     velocity = config.CIRCLE_VELOCITY_RATIO
     cp = config.CIRCLE_CP
