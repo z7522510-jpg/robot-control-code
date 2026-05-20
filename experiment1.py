@@ -91,7 +91,6 @@ def stop_laser_and_return(laser, dobot, saved_start_pose):
 def run_experiment():
     laser, dobot, feed_thread, saved_start_pose = initialize()
     ask_robot_step()
-    ask_pulse()
     loop_wavelengths = ask_loop_wavelengths()
 
     step_count = calculate_step_count(config.TOTAL_DISTANCE_MM, config.STEP_DISTANCE_MM)
