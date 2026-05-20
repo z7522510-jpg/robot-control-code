@@ -7,7 +7,6 @@
 #uutill everything are done, change wavelength
 
 import math
-import re
 
 import config
 
@@ -57,23 +56,44 @@ def calibration(dobot):
     return set_tool_result, activate_result
 
 
-def get_pose(dobot, user=0, tool=0):
-    recv = dobot.dashboard.GetPose(user=user, tool=tool)
-    print("GetPose:", recv)
-    values = [float(num) for num in re.findall(r"-?\d+(?:\.\d+)?", recv)]
-    if len(values) >= 7 and int(values[0]) == 0:
-        return values[1:7]
-    raise ValueError("GetPose failed: " + recv)
+def ask_circle_radius():
+    radius = float(input(f"Circle radius mm [{config.CIRCLE_RADIUS_MM}]: ") or config.CIRCLE_RADIUS_MM)
+    if radius <= 0:
+        raise ValueError("Circle radius must be greater than 0")
+
+    config.CIRCLE_RADIUS_MM = radius
+    print("CIRCLE_RADIUS_MM =", config.CIRCLE_RADIUS_MM)
+    return radius
+
+
+def ask_circle_angle_step():
+    angle_step = float(input(f"Circle angle step degrees [{config.CIRCLE_STEP_DEG}]: ") or config.CIRCLE_STEP_DEG)
+    if angle_step <= 0:
+        raise ValueError("Circle angle step must be greater than 0")
+
+    config.CIRCLE_STEP_DEG = angle_step
+    print("CIRCLE_STEP_DEG =", config.CIRCLE_STEP_DEG)
+    return angle_step
+
+
+def ask_circle_end_angle():
+    end_angle = float(input(f"Circle end angle degrees [{config.CIRCLE_END_DEG}]: ") or config.CIRCLE_END_DEG)
+    if end_angle <= 0:
+        raise ValueError("Circle end angle must be greater than 0")
+
+    config.CIRCLE_END_DEG = end_angle
+    print("CIRCLE_END_DEG =", config.CIRCLE_END_DEG)
+    return end_angle
 
 
 def generate_xz_circle_poses(
     initial_pose,
-    radius=350,
-    angle_step_deg=5,
-    end_angle_deg=90,
-    rx=180,
-    start_ry=0,
-    rz=0,
+    radius,
+    angle_step_deg,
+    end_angle_deg,
+    rx,
+    start_ry,
+    rz,
 ):
     initial_x = initial_pose[0]
     fixed_y = initial_pose[1]
@@ -97,13 +117,13 @@ def generate_xz_circle_poses(
 
 
 def run_circular_move(dobot):
-    user = getattr(config, "CIRCLE_USER_INDEX", 0)
-    tool = getattr(config, "CIRCLE_TOOL_INDEX", 0)
-    acceleration = getattr(config, "CIRCLE_ACCELERATION_RATIO", 20)
-    velocity = getattr(config, "CIRCLE_VELOCITY_RATIO", 20)
-    cp = getattr(config, "CIRCLE_CP", 100)
+    user = config.CIRCLE_USER_INDEX
+    tool = config.CIRCLE_TOOL_INDEX
+    acceleration = config.CIRCLE_ACCELERATION_RATIO
+    velocity = config.CIRCLE_VELOCITY_RATIO
+    cp = config.CIRCLE_CP
 
-    initial_pose = getattr(config, "CIRCLE_INITIAL_POSE", None)
+    initial_pose = config.CIRCLE_INITIAL_POSE
     if initial_pose:
         move_result = dobot.dashboard.MovJ(
             *initial_pose,
@@ -118,17 +138,21 @@ def run_circular_move(dobot):
         if not dobot.WaitCommandDone(move_result):
             raise RuntimeError("MovJ failed or timed out")
 
-    initial_pose = get_pose(dobot, user=user, tool=tool)
+    initial_pose = dobot.GetCurrentPose()
     print("Initial pose:", initial_pose)
+
+    radius = ask_circle_radius()
+    angle_step_deg = ask_circle_angle_step()
+    end_angle_deg = ask_circle_end_angle()
 
     poses = generate_xz_circle_poses(
         initial_pose,
-        radius=getattr(config, "CIRCLE_RADIUS_MM", 350),
-        angle_step_deg=getattr(config, "CIRCLE_STEP_DEG", 5),
-        end_angle_deg=getattr(config, "CIRCLE_END_DEG", 90),
-        rx=getattr(config, "CIRCLE_RX_DEG", 180),
-        start_ry=getattr(config, "CIRCLE_START_RY_DEG", 0),
-        rz=getattr(config, "CIRCLE_RZ_DEG", 0),
+        radius=radius,
+        angle_step_deg=angle_step_deg,
+        end_angle_deg=end_angle_deg,
+        rx=config.CIRCLE_RX_DEG,
+        start_ry=config.CIRCLE_START_RY_DEG,
+        rz=config.CIRCLE_RZ_DEG,
     )
 
     for index, pose in enumerate(poses, start=1):
