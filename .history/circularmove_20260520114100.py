@@ -78,14 +78,14 @@ def ask_circle_radius():
     return radius
 
 
-def ask_circle_total_steps():
-    total_steps = int(input(f"Circle total steps [{config.CIRCLE_TOTAL_STEPS}]: ") or config.CIRCLE_TOTAL_STEPS)
-    if total_steps <= 0:
-        raise ValueError("Circle total steps must be greater than 0")
+def ask_circle_angle_step():
+    angle_step = float(input(f"Circle angle step degrees [{config.CIRCLE_STEP_DEG}]: ") or config.CIRCLE_STEP_DEG)
+    if angle_step <= 0:
+        raise ValueError("Circle angle step must be greater than 0")
 
-    config.CIRCLE_TOTAL_STEPS = total_steps
-    print("CIRCLE_TOTAL_STEPS =", config.CIRCLE_TOTAL_STEPS)
-    return total_steps
+    config.CIRCLE_STEP_DEG = angle_step
+    print("CIRCLE_STEP_DEG =", config.CIRCLE_STEP_DEG)
+    return angle_step
 
 
 def ask_circle_end_angle():
@@ -138,9 +138,8 @@ def run_experiment():
     cp = config.CIRCLE_CP
 
     radius = ask_circle_radius()
+    angle_step_deg = ask_circle_angle_step()
     end_angle_deg = ask_circle_end_angle()
-    total_steps = ask_circle_total_steps()
-    angle_step_deg = end_angle_deg / total_steps
 
     poses = generate_xz_circle_poses(
         initial_pose,

@@ -14,22 +14,10 @@ from Dobot import get_robot_error, initialize_robot
 
 
 def initialize():
-    dobot, feed_thread, saved_start_pose = initialize_robot(
+    return initialize_robot(
         config.DOBOT_IP,
         config.SPEED_RATIO,
     )
-
-    target_pose = list(saved_start_pose)
-    target_pose[3] = 180
-    target_pose[4] = 0
-    move_result = dobot.dashboard.MovJ(*target_pose, 0)
-    print("MovJ to initial orientation (rx=180, ry=0):", move_result)
-    if not dobot.WaitCommandDone(move_result):
-        raise RuntimeError("Initial orientation MovJ failed or timed out")
-
-    initial_pose = dobot.GetCurrentPose()
-    print("Initial pose:", initial_pose)
-    return dobot, feed_thread, initial_pose
 
 
 def _tool_frame_values(tool_frame):
@@ -78,14 +66,14 @@ def ask_circle_radius():
     return radius
 
 
-def ask_circle_total_steps():
-    total_steps = int(input(f"Circle total steps [{config.CIRCLE_TOTAL_STEPS}]: ") or config.CIRCLE_TOTAL_STEPS)
-    if total_steps <= 0:
-        raise ValueError("Circle total steps must be greater than 0")
+def ask_circle_angle_step():
+    angle_step = float(input(f"Circle angle step degrees [{config.CIRCLE_STEP_DEG}]: ") or config.CIRCLE_STEP_DEG)
+    if angle_step <= 0:
+        raise ValueError("Circle angle step must be greater than 0")
 
-    config.CIRCLE_TOTAL_STEPS = total_steps
-    print("CIRCLE_TOTAL_STEPS =", config.CIRCLE_TOTAL_STEPS)
-    return total_steps
+    config.CIRCLE_STEP_DEG = angle_step
+    print("CIRCLE_STEP_DEG =", config.CIRCLE_STEP_DEG)
+    return angle_step
 
 
 def ask_circle_end_angle():
@@ -128,19 +116,34 @@ def generate_xz_circle_poses(
     return poses
 
 
-def run_experiment():
-    dobot, feed_thread, initial_pose = initialize()
-
+def run_circular_move(dobot):
     user = config.CIRCLE_USER_INDEX
     tool = config.CIRCLE_TOOL_INDEX
     acceleration = config.CIRCLE_ACCELERATION_RATIO
     velocity = config.CIRCLE_VELOCITY_RATIO
     cp = config.CIRCLE_CP
 
+    initial_pose = config.CIRCLE_INITIAL_POSE
+    if initial_pose:
+        move_result = dobot.dashboard.MovJ(
+            *initial_pose,
+            0,
+            user=user,
+            tool=tool,
+            a=acceleration,
+            v=velocity,
+            cp=cp,
+        )
+        print("MovJ:", move_result)
+        if not dobot.WaitCommandDone(move_result):
+            raise RuntimeError("MovJ failed or timed out")
+
+    initial_pose = dobot.GetCurrentPose()
+    print("Initial pose:", initial_pose)
+
     radius = ask_circle_radius()
+    angle_step_deg = ask_circle_angle_step()
     end_angle_deg = ask_circle_end_angle()
-    total_steps = ask_circle_total_steps()
-    angle_step_deg = end_angle_deg / total_steps
 
     poses = generate_xz_circle_poses(
         initial_pose,
@@ -170,7 +173,13 @@ def run_experiment():
         if not dobot.WaitCommandDone(move_result):
             raise RuntimeError("MovJ failed or timed out")
 
-    return dobot, feed_thread, initial_pose, poses
+    return poses
+
+
+def run_experiment():
+    dobot, feed_thread, saved_start_pose = initialize()
+    poses = run_circular_move(dobot)
+    return dobot, feed_thread, saved_start_pose, poses
 
 
 if __name__ == "__main__":
