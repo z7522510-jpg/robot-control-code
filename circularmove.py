@@ -7,29 +7,45 @@
 #uutill everything are done, change wavelength
 
 import math
+from time import sleep
 
 import config
 
 from Dobot import get_robot_error, initialize_robot
+from Laser import connect_laser
+from experiment1 import ask_loop_wavelengths, ask_pulse, stop_laser_and_return
 
 
 def initialize():
+    laser = connect_laser(config.LASER_DLL_PATH)
+    laser.initialize_laser(config.LASER_WAVELENGTH_NM)
+
     dobot, feed_thread, saved_start_pose = initialize_robot(
         config.DOBOT_IP,
         config.SPEED_RATIO,
     )
 
+    initial_pose = get_initial_pose(dobot, saved_start_pose)
+    return laser, dobot, feed_thread, saved_start_pose, initial_pose
+
+
+def get_initial_pose(dobot, saved_start_pose):
     target_pose = list(saved_start_pose)
-    target_pose[3] = 180
-    target_pose[4] = 0
-    move_result = dobot.dashboard.MovJ(*target_pose, 0)
-    print("MovJ to initial orientation (rx=180, ry=0):", move_result)
-    if not dobot.WaitCommandDone(move_result):
-        raise RuntimeError("Initial orientation MovJ failed or timed out")
+    target_pose[3] = config.CIRCLE_RX_DEG
+    target_pose[4] = config.CIRCLE_START_RY_DEG
+    run_step(
+        dobot,
+        target_pose,
+        config.CIRCLE_USER_INDEX,
+        config.CIRCLE_TOOL_INDEX,
+        config.CIRCLE_ACCELERATION_RATIO,
+        config.CIRCLE_VELOCITY_RATIO,
+        config.CIRCLE_CP,
+    )
 
     initial_pose = dobot.GetCurrentPose()
     print("Initial pose:", initial_pose)
-    return dobot, feed_thread, initial_pose
+    return initial_pose
 
 
 def _tool_frame_values(tool_frame):
@@ -66,6 +82,23 @@ def calibration(dobot):
     print("SetTool result:", set_tool_result)
     print("ActivateTool result:", activate_result)
     return set_tool_result, activate_result
+
+
+def run_step(dobot, pose, user, tool, acceleration, velocity, cp):
+    move_result = dobot.dashboard.MovJ(
+        *pose,
+        0,
+        user=user,
+        tool=tool,
+        a=acceleration,
+        v=velocity,
+        cp=cp,
+    )
+    print("MovJ:", move_result)
+    if not dobot.WaitCommandDone(move_result):
+        raise RuntimeError("MovJ failed or timed out")
+
+    return move_result
 
 
 def ask_circle_radius():
@@ -129,7 +162,7 @@ def generate_xz_circle_poses(
 
 
 def run_experiment():
-    dobot, feed_thread, initial_pose = initialize()
+    laser, dobot, feed_thread, saved_start_pose, initial_pose = initialize()
 
     user = config.CIRCLE_USER_INDEX
     tool = config.CIRCLE_TOOL_INDEX
@@ -140,6 +173,8 @@ def run_experiment():
     radius = ask_circle_radius()
     end_angle_deg = ask_circle_end_angle()
     total_steps = ask_circle_total_steps()
+    ask_pulse()
+    loop_wavelengths = ask_loop_wavelengths()
     angle_step_deg = end_angle_deg / total_steps
 
     poses = generate_xz_circle_poses(
@@ -152,25 +187,65 @@ def run_experiment():
         rz=config.CIRCLE_RZ_DEG,
     )
 
-    for index, pose in enumerate(poses, start=1):
+    try:
         if get_robot_error(dobot):
-            raise RuntimeError("Dobot has active errors. Stop circular move.")
+            stop_laser_and_return(laser, dobot, saved_start_pose)
+            return laser, dobot, feed_thread, saved_start_pose
 
-        print(f"Circle point {index}/{len(poses)}:", pose)
-        move_result = dobot.dashboard.MovJ(
-            *pose,
-            0,
-            user=user,
-            tool=tool,
-            a=acceleration,
-            v=velocity,
-            cp=cp,
-        )
-        print("MovJ:", move_result)
-        if not dobot.WaitCommandDone(move_result):
-            raise RuntimeError("MovJ failed or timed out")
+        # Set tool coordinates.
+        set_tool_result = dobot.SetTool(config.TOOL_INDEX, config.TOOL_FRAME)
+        activate_result = dobot.ActivateTool(config.TOOL_INDEX)
+        print("SetTool result:", set_tool_result)
+        print("ActivateTool result:", activate_result)
 
-    return dobot, feed_thread, initial_pose, poses
+        laser.run()
+        print("Laser RUN")
+        sleep(5)
+
+        for loop_index, wavelength in enumerate(loop_wavelengths, start=1):
+            if get_robot_error(dobot):
+                stop_laser_and_return(laser, dobot, saved_start_pose)
+                return laser, dobot, feed_thread, saved_start_pose
+
+            print(f"Loop {loop_index}/{len(loop_wavelengths)}")
+            laser.set_wavelength(wavelength)
+            sleep(2)
+
+            for index, pose in enumerate(poses, start=1):
+                if get_robot_error(dobot):
+                    stop_laser_and_return(laser, dobot, saved_start_pose)
+                    return laser, dobot, feed_thread, saved_start_pose
+
+                print(f"Circle point {index}/{len(poses)}:", pose)
+                run_step(
+                    dobot,
+                    pose,
+                    user=user,
+                    tool=tool,
+                    acceleration=acceleration,
+                    velocity=velocity,
+                    cp=cp,
+                )
+
+            if get_robot_error(dobot):
+                stop_laser_and_return(laser, dobot, saved_start_pose)
+                return laser, dobot, feed_thread, saved_start_pose
+
+            run_step(
+                dobot,
+                initial_pose,
+                user=user,
+                tool=tool,
+                acceleration=acceleration,
+                velocity=velocity,
+                cp=cp,
+            )
+            sleep(2)
+
+    finally:
+        laser.stop_safely()
+
+    return laser, dobot, feed_thread, saved_start_pose, poses
 
 
 if __name__ == "__main__":
