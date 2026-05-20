@@ -176,11 +176,11 @@ def run_circular_move(dobot):
     return poses
 
 
-def run_experiment():
+def main():
     dobot, feed_thread, saved_start_pose = initialize()
     poses = run_circular_move(dobot)
     return dobot, feed_thread, saved_start_pose, poses
 
 
 if __name__ == "__main__":
-    run_experiment()
+    main()
