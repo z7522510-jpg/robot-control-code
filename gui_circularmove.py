@@ -40,14 +40,25 @@ class CircularMoveGui(tk.Tk):
         self.settings = self._load_settings()
         self.loop_count_var = tk.StringVar(value=str(config.LOOP_REPEAT_COUNT))
         self.wavelength_entries = []
+        saved_tool_frame = self.settings.get("TOOL_FRAME", config.TOOL_FRAME)
+        self.current_tool_index_var = tk.StringVar(value="Not initialized")
+        self.current_tool_frame_var = tk.StringVar(value=f"Saved value: {saved_tool_frame}")
 
         self.build_ui()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.after(100, self.drain_log)
 
     def build_ui(self):
-        form = ttk.LabelFrame(self, text="Circular Move Parameters", padding=12)
-        form.pack(fill="x", padx=12, pady=10)
+        notebook = ttk.Notebook(self)
+        notebook.pack(fill="x", padx=12, pady=10)
+
+        move_page = ttk.Frame(notebook, padding=10)
+        self.tool_page = ttk.Frame(notebook, padding=10)
+        notebook.add(move_page, text="Circular Move")
+        notebook.add(self.tool_page, text="Tool Frame")
+
+        form = ttk.LabelFrame(move_page, text="Circular Move Parameters", padding=12)
+        form.pack(fill="x")
 
         fields = [
             ("Speed Ratio", "SPEED_RATIO", config.SPEED_RATIO),
@@ -65,8 +76,6 @@ class CircularMoveGui(tk.Tk):
             ("Circle Rx deg", "CIRCLE_RX_DEG", config.CIRCLE_RX_DEG),
             ("Circle Start Ry deg", "CIRCLE_START_RY_DEG", config.CIRCLE_START_RY_DEG),
             ("Circle Rz deg", "CIRCLE_RZ_DEG", config.CIRCLE_RZ_DEG),
-            ("Tool Index", "TOOL_INDEX", config.TOOL_INDEX),
-            ("Tool Frame", "TOOL_FRAME", config.TOOL_FRAME),
         ]
 
         for row, (label, key, value) in enumerate(fields):
@@ -83,12 +92,14 @@ class CircularMoveGui(tk.Tk):
 
         form.columnconfigure(1, weight=1)
 
-        self.wavelength_frame = ttk.LabelFrame(self, text="Loop Wavelengths", padding=12)
-        self.wavelength_frame.pack(fill="x", padx=12, pady=(0, 10))
+        self.wavelength_frame = ttk.LabelFrame(move_page, text="Loop Wavelengths", padding=12)
+        self.wavelength_frame.pack(fill="x", pady=(10, 0))
         self.update_wavelength_entries()
         self.loop_count_var.trace_add(
             "write", lambda *_: self.after_idle(self.update_wavelength_entries)
         )
+
+        self.build_tool_frame_page()
 
         buttons = ttk.Frame(self, padding=(12, 0))
         buttons.pack(fill="x")
@@ -110,6 +121,56 @@ class CircularMoveGui(tk.Tk):
         self.log_text.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
+    def build_tool_frame_page(self):
+        current_frame = ttk.LabelFrame(self.tool_page, text="Current Tool Frame", padding=12)
+        current_frame.pack(fill="x")
+
+        ttk.Label(current_frame, text="Active Tool Index").grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Label(current_frame, textvariable=self.current_tool_index_var).grid(
+            row=0, column=1, sticky="w", pady=4
+        )
+        ttk.Label(current_frame, text="Active Tool Frame").grid(row=1, column=0, sticky="nw", pady=4)
+        ttk.Label(
+            current_frame,
+            textvariable=self.current_tool_frame_var,
+            wraplength=620,
+        ).grid(row=1, column=1, sticky="ew", pady=4)
+        current_frame.columnconfigure(1, weight=1)
+
+        edit_frame = ttk.LabelFrame(self.tool_page, text="Tool Frame Settings", padding=12)
+        edit_frame.pack(fill="x", pady=(10, 0))
+
+        fields = [
+            ("Tool Index", "TOOL_INDEX", config.TOOL_INDEX),
+            ("Tool Frame", "TOOL_FRAME", config.TOOL_FRAME),
+        ]
+
+        for row, (label, key, value) in enumerate(fields):
+            ttk.Label(edit_frame, text=label).grid(row=row, column=0, sticky="w", pady=4)
+            entry = ttk.Entry(edit_frame, width=38)
+            entry.insert(0, str(self.settings.get(key, value)))
+            entry.grid(row=row, column=1, sticky="ew", pady=4)
+            self.inputs[key] = entry
+
+        edit_frame.columnconfigure(1, weight=1)
+
+        tool_buttons = ttk.Frame(self.tool_page)
+        tool_buttons.pack(fill="x", pady=(10, 0))
+        self.activate_tool_button = ttk.Button(
+            tool_buttons,
+            text="Activate Tool Frame",
+            command=self.activate_tool_frame,
+            state="disabled",
+        )
+        self.refresh_tool_button = ttk.Button(
+            tool_buttons,
+            text="Refresh Current",
+            command=self.refresh_tool_frame_display,
+            state="disabled",
+        )
+        self.activate_tool_button.pack(side="left", padx=(0, 8))
+        self.refresh_tool_button.pack(side="left")
+
     def _load_settings(self):
         try:
             with SETTINGS_PATH.open("r", encoding="utf-8") as file:
@@ -125,6 +186,80 @@ class CircularMoveGui(tk.Tk):
                 json.dump(settings, file, indent=2)
         except Exception:
             pass
+
+    def read_tool_parameters(self, apply=True):
+        tool_index = int(float(self.inputs["TOOL_INDEX"].get()))
+        tool_frame = self.inputs["TOOL_FRAME"].get().strip()
+
+        if tool_index < 0:
+            raise ValueError("Tool Index cannot be negative")
+        if not tool_frame:
+            raise ValueError("Tool Frame cannot be empty")
+
+        if apply:
+            config.TOOL_INDEX = tool_index
+            config.TOOL_FRAME = tool_frame
+        return tool_index, tool_frame
+
+    def format_tool_frame(self, values):
+        formatted_values = []
+        for value in values:
+            text = f"{float(value):.6f}".rstrip("0").rstrip(".")
+            formatted_values.append(text or "0")
+        return "{" + ",".join(formatted_values) + "}"
+
+    def refresh_tool_frame_display(self):
+        if self.dobot is None or not self.initialized:
+            self.current_tool_index_var.set("Not initialized")
+            self.current_tool_frame_var.set(
+                f"Saved value: {self.inputs['TOOL_FRAME'].get().strip()}"
+            )
+            return
+
+        try:
+            tool_index, tool_frame = self.dobot.GetCurrentToolFrame()
+        except Exception as error:
+            self.current_tool_index_var.set("Unavailable")
+            self.current_tool_frame_var.set(str(error))
+            return
+
+        self.current_tool_index_var.set(str(tool_index))
+        self.current_tool_frame_var.set(self.format_tool_frame(tool_frame))
+
+    def activate_tool_frame(self):
+        if self.worker and self.worker.is_alive():
+            return
+        if not self.initialized or self.dobot is None:
+            messagebox.showerror("Not Initialized", "Initialize robot before activating a tool frame.")
+            return
+
+        try:
+            self.read_tool_parameters()
+        except Exception as error:
+            messagebox.showerror("Invalid Tool Frame", str(error))
+            return
+
+        self._save_settings()
+        self.log("Activating tool frame")
+        self.running = False
+        self.set_busy(True)
+
+        def worker():
+            try:
+                with contextlib.redirect_stdout(self):
+                    set_tool_result = self.dobot.SetTool(config.TOOL_INDEX, config.TOOL_FRAME)
+                    activate_result = self.dobot.ActivateTool(config.TOOL_INDEX)
+                    print("SetTool result:", set_tool_result)
+                    print("ActivateTool result:", activate_result)
+                    time.sleep(0.2)
+                self.log("Tool frame activated")
+            except Exception as error:
+                self.log(f"ERROR: {error}")
+            finally:
+                self.log_queue.put(self.done_token)
+
+        self.worker = threading.Thread(target=worker, daemon=True)
+        self.worker.start()
 
     def update_wavelength_entries(self):
         try:
@@ -174,9 +309,8 @@ class CircularMoveGui(tk.Tk):
         rx = float(self.inputs["CIRCLE_RX_DEG"].get())
         start_ry = float(self.inputs["CIRCLE_START_RY_DEG"].get())
         rz = float(self.inputs["CIRCLE_RZ_DEG"].get())
-        tool_index = int(float(self.inputs["TOOL_INDEX"].get()))
-        tool_frame = self.inputs["TOOL_FRAME"].get().strip()
         wavelengths = [float(entry.get().strip()) for entry in self.wavelength_entries]
+        tool_index, tool_frame = self.read_tool_parameters(apply=False)
 
         if speed_ratio <= 0:
             raise ValueError("Speed Ratio must be greater than 0")
@@ -196,14 +330,12 @@ class CircularMoveGui(tk.Tk):
             raise ValueError("Loop wavelength count must match Loop Repeat Count")
         if any(wavelength <= 0 for wavelength in wavelengths):
             raise ValueError("Each wavelength must be greater than 0")
-        if user_index < 0 or motion_tool_index < 0 or tool_index < 0:
-            raise ValueError("User and tool indexes cannot be negative")
+        if user_index < 0 or motion_tool_index < 0:
+            raise ValueError("User and motion tool indexes cannot be negative")
         if acceleration <= 0 or velocity <= 0:
             raise ValueError("Acceleration and Velocity must be greater than 0")
         if cp < 0:
             raise ValueError("CP cannot be negative")
-        if not tool_frame:
-            raise ValueError("Tool Frame cannot be empty")
 
         config.SPEED_RATIO = speed_ratio
         config.CIRCLE_RADIUS_MM = radius
@@ -399,6 +531,9 @@ class CircularMoveGui(tk.Tk):
         self.start_button.configure(state="disabled" if busy or not self.initialized else "normal")
         self.stop_button.configure(state="normal" if self.running else "disabled")
         self.return_button.configure(state="normal" if self.running else "disabled")
+        tool_state = "normal" if self.initialized and not busy else "disabled"
+        self.activate_tool_button.configure(state=tool_state)
+        self.refresh_tool_button.configure(state=tool_state)
 
     def log(self, text):
         self.log_queue.put(text)
@@ -419,6 +554,7 @@ class CircularMoveGui(tk.Tk):
             if text is self.done_token:
                 self.running = False
                 self.set_busy(False)
+                self.refresh_tool_frame_display()
             else:
                 self.log_text.insert("end", text.rstrip() + "\n")
                 self.log_text.see("end")

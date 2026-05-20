@@ -28,6 +28,8 @@ class Dobot:
                 self.DigitalInputs =-1
                 self.DigitalOutputs = -1
                 self.robotCurrentCommandID = -1
+                self.Tool = -1
+                self.ToolValue = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
                 # 自定义添加所需反馈数据
 
         self.feedData = item()  # 定义结构对象
@@ -48,6 +50,10 @@ class Dobot:
         print(f"Tool({index}):", result)
         return result
 
+    def GetCurrentToolFrame(self):
+        with self.__globalLockValue:
+            return int(self.feedData.Tool), list(self.feedData.ToolValue)
+
     def GetFeed(self):
         # 获取机器人状态
         while True:
@@ -66,6 +72,10 @@ class Dobot:
                         self.feedData.DigitalInputs = feedInfo['DigitalInputs'][0]
                         self.feedData.DigitalOutputs = feedInfo['DigitalOutputs'][0]
                         self.feedData.robotCurrentCommandID = feedInfo['CurrentCommandId'][0]
+                        self.feedData.Tool = feedInfo['Tool'][0]
+                        self.feedData.ToolValue = [
+                            float(value) for value in feedInfo['ToolValue[6]'][0]
+                        ]
                         # 自定义添加所需反馈数据
                         '''
                         self.feedData.DigitalOutputs = int(feedInfo['DigitalOutputs'][0])
