@@ -23,7 +23,7 @@ STEP_WAIT_SECONDS = 0.150
 
 # Tool frame for SetTool, format: "{x,y,z,rx,ry,rz}".
 TOOL_INDEX = 1
-TOOL_FRAME = "{1.34,3.09056,218.6788,0,0,86}"
+TOOL_FRAME = "{1.34,3.09056,418.6788,0,0,86}"
 
 # Circular move.
 CIRCLE_USER_INDEX = 0

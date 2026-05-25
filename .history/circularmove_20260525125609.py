@@ -11,8 +11,9 @@ from time import sleep
 
 import config
 
-from Dobot import get_robot_error, initialize_robot, stop_and_return
+from Dobot import get_robot_error, initialize_robot
 from Laser import connect_laser
+from experiment1 import ask_loop_wavelengths, ask_pulse, stop_laser_and_return
 
 
 def get_circle_center_tool_frame():
@@ -211,13 +212,6 @@ def generate_tool_center_circle_poses(
 
 
 def run_experiment():
-    # Ask circle params before initialize(): the radius is baked into the
-    # virtual circle-center tool frame that initialize() sets up.
-    ask_circle_radius()
-    end_angle_deg = ask_circle_end_angle()
-    total_steps = ask_circle_total_steps()
-    angle_step_deg = end_angle_deg / total_steps
-
     laser, dobot, feed_thread, saved_start_pose, initial_pose = initialize()
 
     user = config.CIRCLE_USER_INDEX
@@ -225,6 +219,13 @@ def run_experiment():
     acceleration = config.CIRCLE_ACCELERATION_RATIO
     velocity = config.CIRCLE_VELOCITY_RATIO
     cp = config.CIRCLE_CP
+
+    ask_circle_radius()
+    end_angle_deg = ask_circle_end_angle()
+    total_steps = ask_circle_total_steps()
+    ask_pulse()
+    loop_wavelengths = ask_loop_wavelengths()
+    angle_step_deg = end_angle_deg / total_steps
 
     poses = generate_tool_center_circle_poses(
         initial_pose,
@@ -235,57 +236,62 @@ def run_experiment():
         rz=config.CIRCLE_RZ_DEG,
     )
 
-    if get_robot_error(dobot):
-        stop_and_return(dobot, saved_start_pose, config.SPEED_RATIO)
-        return laser, dobot, feed_thread, saved_start_pose, poses
-
-    # Virtual circle-center tool frame is already set and active from initialize().
-
-    for loop_index in range(1, config.LOOP_REPEAT_COUNT + 1):
+    try:
         if get_robot_error(dobot):
-            stop_and_return(dobot, saved_start_pose, config.SPEED_RATIO)
-            return laser, dobot, feed_thread, saved_start_pose, poses
+            stop_laser_and_return(laser, dobot, saved_start_pose)
+            return laser, dobot, feed_thread, saved_start_pose
 
-        print(f"Loop {loop_index}/{config.LOOP_REPEAT_COUNT}")
+        # Virtual circle-center tool frame is already set and active from initialize().
 
-        for index, pose in enumerate(poses, start=1):
+        laser.run()
+        print("Laser RUN")
+        sleep(5)
+
+        for loop_index, wavelength in enumerate(loop_wavelengths, start=1):
             if get_robot_error(dobot):
-                stop_and_return(dobot, saved_start_pose, config.SPEED_RATIO)
-                return laser, dobot, feed_thread, saved_start_pose, poses
+                stop_laser_and_return(laser, dobot, saved_start_pose)
+                return laser, dobot, feed_thread, saved_start_pose
 
-            print(f"Circle point {index}/{len(poses)}:", pose)
+            print(f"Loop {loop_index}/{len(loop_wavelengths)}")
+            laser.set_wavelength(wavelength)
+            sleep(2)
+
+            for index, pose in enumerate(poses, start=1):
+                if get_robot_error(dobot):
+                    stop_laser_and_return(laser, dobot, saved_start_pose)
+                    return laser, dobot, feed_thread, saved_start_pose
+
+                print(f"Circle point {index}/{len(poses)}:", pose)
+                run_step(
+                    dobot,
+                    pose,
+                    user=user,
+                    tool=tool,
+                    acceleration=acceleration,
+                    velocity=velocity,
+                    cp=cp,
+                )
+
+            if get_robot_error(dobot):
+                stop_laser_and_return(laser, dobot, saved_start_pose)
+                return laser, dobot, feed_thread, saved_start_pose
+
             run_step(
                 dobot,
-                pose,
+                initial_pose,
                 user=user,
                 tool=tool,
                 acceleration=acceleration,
                 velocity=velocity,
                 cp=cp,
             )
+            sleep(2)
 
-        if get_robot_error(dobot):
-            stop_and_return(dobot, saved_start_pose, config.SPEED_RATIO)
-            return laser, dobot, feed_thread, saved_start_pose, poses
-
-        run_step(
-            dobot,
-            initial_pose,
-            user=user,
-            tool=tool,
-            acceleration=acceleration,
-            velocity=velocity,
-            cp=cp,
-        )
-        sleep(2)
+    finally:
+        laser.stop_safely()
 
     return laser, dobot, feed_thread, saved_start_pose, poses
 
 
 if __name__ == "__main__":
-    laser = None
-    try:
-        laser = run_experiment()[0]
-    finally:
-        if laser is not None:
-            laser.close()
+    run_experiment()
