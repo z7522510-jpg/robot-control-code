@@ -21,9 +21,11 @@ TOTAL_DISTANCE_MM  = 4
 LOOP_REPEAT_COUNT = 1
 STEP_WAIT_SECONDS = 0.150
 
-# Tool frame for SetTool, format: "{x,y,z,rx,ry,rz}".
+# Tool frame for the original tool end, format: "{x,y,z,rx,ry,rz}".
+# Circular move temporarily adds CIRCLE_RADIUS_MM to z and uses that point as
+# the virtual TCP/circle center.
 TOOL_INDEX = 1
-TOOL_FRAME = "{0,0,260,0,0,0}"
+TOOL_FRAME = "{0,0,0,0,0,0}"
 
 # Circular move.
 CIRCLE_USER_INDEX = 0

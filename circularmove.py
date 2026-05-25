@@ -16,6 +16,15 @@ from Laser import connect_laser
 from experiment1 import ask_loop_wavelengths, ask_pulse, stop_laser_and_return
 
 
+def get_circle_center_tool_frame():
+    values = _tool_frame_values(config.TOOL_FRAME)
+    if len(values) != 6:
+        raise ValueError("TOOL_FRAME must have 6 values: x, y, z, rx, ry, rz")
+
+    values[2] += config.CIRCLE_RADIUS_MM
+    return "{" + ",".join(str(value) for value in values) + "}"
+
+
 def initialize():
     laser = connect_laser(config.LASER_DLL_PATH)
     try:
@@ -25,9 +34,11 @@ def initialize():
             config.SPEED_RATIO,
         )
 
-        # Activate the configured tool BEFORE capturing the pose so all
-        # subsequent (x,y,z,rx,ry,rz) values live in the same frame.
-        dobot.SetTool(config.TOOL_INDEX, config.TOOL_FRAME)
+        # For circular motion, the active TCP is a virtual point below the
+        # original tool end. Holding this point fixed lets the real tool end
+        # swing around it as rx/ry/rz changes.
+        circle_tool_frame = get_circle_center_tool_frame()
+        dobot.SetTool(config.TOOL_INDEX, circle_tool_frame)
         dobot.ActivateTool(config.TOOL_INDEX)
 
         saved_start_pose = dobot.GetCurrentPose()
@@ -48,6 +59,7 @@ def get_initial_pose(dobot, saved_start_pose):
     target_pose = list(saved_start_pose)
     target_pose[3] = config.CIRCLE_RX_DEG
     target_pose[4] = config.CIRCLE_START_RY_DEG
+    target_pose[5] = config.CIRCLE_RZ_DEG
     run_step(
         dobot,
         target_pose,
@@ -176,6 +188,29 @@ def generate_xz_circle_poses(
     return poses
 
 
+def generate_tool_center_circle_poses(
+    initial_pose,
+    angle_step_deg,
+    end_angle_deg,
+    rx,
+    start_ry,
+    rz,
+):
+    center_x = initial_pose[0]
+    center_y = initial_pose[1]
+    center_z = initial_pose[2]
+
+    poses = []
+    current_angle = 0
+
+    while current_angle < end_angle_deg:
+        ry = start_ry + current_angle
+        poses.append([center_x, center_y, center_z, rx, ry, rz])
+        current_angle += angle_step_deg
+
+    return poses
+
+
 def run_experiment():
     laser, dobot, feed_thread, saved_start_pose, initial_pose = initialize()
 
@@ -185,16 +220,15 @@ def run_experiment():
     velocity = config.CIRCLE_VELOCITY_RATIO
     cp = config.CIRCLE_CP
 
-    radius = ask_circle_radius()
+    ask_circle_radius()
     end_angle_deg = ask_circle_end_angle()
     total_steps = ask_circle_total_steps()
     ask_pulse()
     loop_wavelengths = ask_loop_wavelengths()
     angle_step_deg = end_angle_deg / total_steps
 
-    poses = generate_xz_circle_poses(
+    poses = generate_tool_center_circle_poses(
         initial_pose,
-        radius=radius,
         angle_step_deg=angle_step_deg,
         end_angle_deg=end_angle_deg,
         rx=config.CIRCLE_RX_DEG,
@@ -207,9 +241,11 @@ def run_experiment():
             stop_laser_and_return(laser, dobot, saved_start_pose)
             return laser, dobot, feed_thread, saved_start_pose
 
-        # Set tool coordinates.
-        set_tool_result = dobot.SetTool(config.TOOL_INDEX, config.TOOL_FRAME)
+        # Set virtual circle-center tool coordinates.
+        circle_tool_frame = get_circle_center_tool_frame()
+        set_tool_result = dobot.SetTool(config.TOOL_INDEX, circle_tool_frame)
         activate_result = dobot.ActivateTool(config.TOOL_INDEX)
+        print("Circle center tool frame:", circle_tool_frame)
         print("SetTool result:", set_tool_result)
         print("ActivateTool result:", activate_result)
 

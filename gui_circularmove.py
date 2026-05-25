@@ -62,7 +62,7 @@ class CircularMoveGui(tk.Tk):
 
         fields = [
             ("Speed Ratio", "SPEED_RATIO", config.SPEED_RATIO),
-            ("Circle Radius mm", "CIRCLE_RADIUS_MM", config.CIRCLE_RADIUS_MM),
+            ("Circle Radius / Center Offset mm", "CIRCLE_RADIUS_MM", config.CIRCLE_RADIUS_MM),
             ("Circle End Angle deg", "CIRCLE_END_DEG", config.CIRCLE_END_DEG),
             ("Circle Total Steps", "CIRCLE_TOTAL_STEPS", config.CIRCLE_TOTAL_STEPS),
             ("Trigger DO Index", "TRIGGER_DO_INDEX", config.TRIGGER_DO_INDEX),
@@ -413,9 +413,8 @@ class CircularMoveGui(tk.Tk):
         try:
             with contextlib.redirect_stdout(self):
                 angle_step_deg = config.CIRCLE_END_DEG / config.CIRCLE_TOTAL_STEPS
-                poses = circularmove.generate_xz_circle_poses(
+                poses = circularmove.generate_tool_center_circle_poses(
                     self.initial_pose,
-                    radius=config.CIRCLE_RADIUS_MM,
                     angle_step_deg=angle_step_deg,
                     end_angle_deg=config.CIRCLE_END_DEG,
                     rx=config.CIRCLE_RX_DEG,
@@ -428,7 +427,8 @@ class CircularMoveGui(tk.Tk):
                     self.return_to_saved_start()
                     return
 
-                set_tool_result = self.dobot.SetTool(config.TOOL_INDEX, config.TOOL_FRAME)
+                circle_tool_frame = circularmove.get_circle_center_tool_frame()
+                set_tool_result = self.dobot.SetTool(config.TOOL_INDEX, circle_tool_frame)
                 activate_result = self.dobot.ActivateTool(config.TOOL_INDEX)
                 print("SetTool result:", set_tool_result)
                 print("ActivateTool result:", activate_result)
