@@ -34,9 +34,11 @@ CIRCLE_VELOCITY_RATIO = 20
 CIRCLE_CP = 100
 CIRCLE_INITIAL_POSE = None
 
-# Distance from the current probe/tool end to the temporary circular-scan
-# center TCP, in millimeters.
+# The circle center is first defined SUBCUTANEOUS_SCAN_DISTANCE_MM below the
+# current probe/tool end along user Z. CIRCLE_RADIUS_MM then sets the final
+# probe-to-center distance; the probe moves by radius - subcutaneous distance.
 SUBCUTANEOUS_SCAN_DISTANCE_MM = 350
+CIRCLE_RADIUS_MM = 350
 CIRCLE_ARC_DEG = 120
 CIRCLE_TOTAL_STEPS = 18
 CIRCLE_RX_DEG = 180
