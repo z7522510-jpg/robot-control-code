@@ -7,6 +7,7 @@
 #uutill everything are done, change wavelength
 
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -173,7 +174,17 @@ def _tool_frame_values(tool_frame):
     ]
 
 
-def run_step(dobot, pose, user, tool, acceleration, velocity, cp, circle_tool_frame):
+def run_step(
+    dobot,
+    pose,
+    user,
+    tool,
+    acceleration,
+    velocity,
+    cp,
+    circle_tool_frame,
+    stop_event=None,
+):
     dobot.SetTool(tool, circle_tool_frame)
     dobot.ActivateTool(tool)
     move_result = dobot.dashboard.MovJ(
@@ -186,10 +197,57 @@ def run_step(dobot, pose, user, tool, acceleration, velocity, cp, circle_tool_fr
         cp=cp,
     )
     print("MovJ:", move_result)
-    if not dobot.WaitCommandDone(move_result):
+    if stop_event is None:
+        done = dobot.WaitCommandDone(move_result)
+    else:
+        done = wait_command_done_or_stop(dobot, move_result, stop_event)
+    if not done:
         raise RuntimeError("MovJ failed or timed out")
 
     return move_result
+
+
+def wait_command_done_or_stop(dobot, move_result, stop_event, timeout=30):
+    result_ids = dobot.parseResultId(move_result)
+    print(result_ids)
+    if len(result_ids) < 2 or result_ids[0] != 0:
+        print("Command failed, skip waiting:", move_result)
+        return False
+
+    current_command_id = result_ids[1]
+    print("Command ID:", current_command_id)
+    start_time = time.perf_counter()
+    last_print_time = start_time
+
+    while True:
+        if stop_event.is_set():
+            print("Stop requested while waiting for motion")
+            return False
+
+        now = time.perf_counter()
+        if dobot.feedData.robotMode == 5 and dobot.feedData.robotCurrentCommandID >= current_command_id:
+            print("Motion done")
+            return True
+
+        if now - last_print_time >= 1:
+            print(
+                "Waiting motion done: "
+                f"mode={dobot.feedData.robotMode}, "
+                f"currentCommandID={dobot.feedData.robotCurrentCommandID}, "
+                f"targetCommandID={current_command_id}"
+            )
+            last_print_time = now
+
+        if now - start_time >= timeout:
+            print(
+                "Waiting motion done timeout: "
+                f"mode={dobot.feedData.robotMode}, "
+                f"currentCommandID={dobot.feedData.robotCurrentCommandID}, "
+                f"targetCommandID={current_command_id}"
+            )
+            return False
+
+        time.sleep(0.005)
 
 
 def ask_subcutaneous_scan_distance():
