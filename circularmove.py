@@ -7,12 +7,17 @@
 #uutill everything are done, change wavelength
 
 import math
+from datetime import datetime
+from pathlib import Path
 from time import sleep
 
 import config
 
 from Dobot import get_robot_error, initialize_robot, stop_and_return
 from Laser import connect_laser
+
+
+CURRENT_POSE_DIR = Path(__file__).with_name("currentpose")
 
 
 def get_circle_center_tool_frame():
@@ -22,6 +27,39 @@ def get_circle_center_tool_frame():
 
     values[2] += config.CIRCLE_RADIUS_MM
     return "{" + ",".join(str(value) for value in values) + "}"
+
+
+def create_current_pose_report(start_time):
+    CURRENT_POSE_DIR.mkdir(exist_ok=True)
+    timestamp = start_time.strftime("%Y%m%d_%H%M%S")
+    path = CURRENT_POSE_DIR / f"current_pose_{timestamp}.txt"
+
+    with path.open("w", encoding="utf-8") as file:
+        file.write("Circular move current pose report\n")
+        file.write(f"Start time: {start_time.isoformat(timespec='seconds')}\n")
+        file.write(f"TOOL_INDEX: {config.TOOL_INDEX}\n")
+        file.write(f"TOOL_FRAME: {config.TOOL_FRAME}\n")
+        file.write(f"Circle center tool frame: {get_circle_center_tool_frame()}\n")
+        file.write(f"CIRCLE_RADIUS_MM: {config.CIRCLE_RADIUS_MM}\n")
+        file.write(f"CIRCLE_END_DEG: {config.CIRCLE_END_DEG}\n")
+        file.write(f"CIRCLE_TOTAL_STEPS: {config.CIRCLE_TOTAL_STEPS}\n")
+        file.write("\n")
+
+    print("Current pose report:", path)
+    return path
+
+
+def report_current_pose(dobot, report_path, label, target_pose=None):
+    current_pose = dobot.GetCurrentPose()
+    line = f"{datetime.now().isoformat(timespec='seconds')} | {label} | current_pose={current_pose}"
+    if target_pose is not None:
+        line += f" | target_pose={target_pose}"
+
+    print(line)
+    with report_path.open("a", encoding="utf-8") as file:
+        file.write(line + "\n")
+
+    return current_pose
 
 
 def initialize():
@@ -218,7 +256,10 @@ def run_experiment():
     total_steps = ask_circle_total_steps()
     angle_step_deg = end_angle_deg / total_steps
 
+    start_time = datetime.now()
+    report_path = create_current_pose_report(start_time)
     laser, dobot, feed_thread, saved_start_pose, initial_pose = initialize()
+    report_current_pose(dobot, report_path, "initial_pose", initial_pose)
 
     user = config.CIRCLE_USER_INDEX
     tool = config.TOOL_INDEX
@@ -263,6 +304,12 @@ def run_experiment():
                 velocity=velocity,
                 cp=cp,
             )
+            report_current_pose(
+                dobot,
+                report_path,
+                f"loop {loop_index} circle point {index}/{len(poses)}",
+                pose,
+            )
 
         if get_robot_error(dobot):
             stop_and_return(dobot, saved_start_pose, config.SPEED_RATIO)
@@ -277,7 +324,11 @@ def run_experiment():
             velocity=velocity,
             cp=cp,
         )
+        report_current_pose(dobot, report_path, f"loop {loop_index} return initial", initial_pose)
         sleep(2)
+
+    with report_path.open("a", encoding="utf-8") as file:
+        file.write(f"\nFinish time: {datetime.now().isoformat(timespec='seconds')}\n")
 
     return laser, dobot, feed_thread, saved_start_pose, poses
 

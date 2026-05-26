@@ -4,6 +4,7 @@ import queue
 import threading
 import time
 import tkinter as tk
+from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
 
@@ -410,8 +411,17 @@ class CircularMoveGui(tk.Tk):
         self.worker.start()
 
     def run_experiment(self):
+        report_path = None
         try:
             with contextlib.redirect_stdout(self):
+                report_path = circularmove.create_current_pose_report(datetime.now())
+                circularmove.report_current_pose(
+                    self.dobot,
+                    report_path,
+                    "initial_pose",
+                    self.initial_pose,
+                )
+
                 angle_step_deg = config.CIRCLE_END_DEG / config.CIRCLE_TOTAL_STEPS
                 poses = circularmove.generate_tool_center_circle_poses(
                     self.initial_pose,
@@ -467,6 +477,12 @@ class CircularMoveGui(tk.Tk):
                             velocity=config.CIRCLE_VELOCITY_RATIO,
                             cp=config.CIRCLE_CP,
                         )
+                        circularmove.report_current_pose(
+                            self.dobot,
+                            report_path,
+                            f"loop {loop_index} circle point {point_index}/{len(poses)}",
+                            pose,
+                        )
 
                     if get_robot_error(self.dobot):
                         self.return_to_saved_start()
@@ -481,11 +497,20 @@ class CircularMoveGui(tk.Tk):
                         velocity=config.CIRCLE_VELOCITY_RATIO,
                         cp=config.CIRCLE_CP,
                     )
+                    circularmove.report_current_pose(
+                        self.dobot,
+                        report_path,
+                        f"loop {loop_index} return initial",
+                        self.initial_pose,
+                    )
                     if self.wait_seconds(2):
                         return
         except Exception as error:
             self.log(f"ERROR: {error}")
         finally:
+            if report_path is not None:
+                with report_path.open("a", encoding="utf-8") as file:
+                    file.write(f"\nFinish time: {datetime.now().isoformat(timespec='seconds')}\n")
             if self.laser is not None:
                 self.laser.stop_safely()
             self.log("Circular move finished")
