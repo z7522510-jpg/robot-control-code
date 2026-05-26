@@ -129,7 +129,9 @@ def get_circle_tool_cartesian_pose(dobot):
     )
 
 
-def initialize(report_path):
+def initialize_devices(report_path):
+    # Step 1: connect laser + robot, activate the configured tool, and record
+    # the real tool start pose. No circular-motion setup or arm move yet.
     laser = connect_laser(config.LASER_DLL_PATH)
     try:
         laser.initialize_laser(config.LASER_WAVELENGTH_NM)
@@ -143,20 +145,37 @@ def initialize(report_path):
         real_start_pose = get_config_tool_cartesian_pose(dobot)
         print("Real tool start pose:", real_start_pose)
         report_current_pose(dobot, report_path, "real_tool_start_pose", real_start_pose)
-
-        change_radius(dobot)
-        radius_pose = get_config_tool_cartesian_pose(dobot)
-        print("Radius-adjusted real tool pose:", radius_pose)
-        report_current_pose(dobot, report_path, "radius_adjusted_pose", radius_pose)
-
-        circle_tool_frame = get_circle_center_tool_frame()
-        dobot.SetTool(config.CIRCLE_TOOL_INDEX, circle_tool_frame)
-        dobot.ActivateTool(config.CIRCLE_TOOL_INDEX)
-        center_pose = get_circle_tool_cartesian_pose(dobot)
-        print("Circle center pose:", center_pose)
-
     except Exception:
         # Release the laser so the next attempt doesn't see "already connected" (err 17).
+        try:
+            laser.close()
+        except Exception:
+            pass
+        raise
+    return laser, dobot, feed_thread, real_start_pose
+
+
+def set_radius(dobot, report_path):
+    # Step 2: move the arm by the radius delta, then build the virtual
+    # circle-center tool frame and read the circle center pose.
+    change_radius(dobot)
+    radius_pose = get_config_tool_cartesian_pose(dobot)
+    print("Radius-adjusted real tool pose:", radius_pose)
+    report_current_pose(dobot, report_path, "radius_adjusted_pose", radius_pose)
+
+    circle_tool_frame = get_circle_center_tool_frame()
+    dobot.SetTool(config.CIRCLE_TOOL_INDEX, circle_tool_frame)
+    dobot.ActivateTool(config.CIRCLE_TOOL_INDEX)
+    center_pose = get_circle_tool_cartesian_pose(dobot)
+    print("Circle center pose:", center_pose)
+    return radius_pose, center_pose, circle_tool_frame
+
+
+def initialize(report_path):
+    laser, dobot, feed_thread, real_start_pose = initialize_devices(report_path)
+    try:
+        radius_pose, center_pose, circle_tool_frame = set_radius(dobot, report_path)
+    except Exception:
         try:
             laser.close()
         except Exception:

@@ -25,20 +25,25 @@ class CircularMoveGui(tk.Tk):
         self.dobot = None
         self.feed_thread = None
         self.worker = None
+        self.devices_ready = False
         self.prepared = False
         self.running = False
         self.stop_event = threading.Event()
         self.log_queue = queue.Queue()
         self.done_token = object()
         self.report_path = None
+        self.real_start_pose = None
         self.radius_pose = None
         self.center_pose = None
         self.circle_tool_frame = None
         self.poses = []
 
+        self._busy = False
         self.settings = self.load_settings()
         self.inputs = {}
         self.rz_var = tk.DoubleVar(value=float(self.settings.get("CIRCLE_RZ_DEG", config.CIRCLE_RZ_DEG)))
+        self.z_step_var = tk.DoubleVar(value=float(self.settings.get("Z_JOG_STEP_MM", 0.5)))
+        self.z_jog_enabled_var = tk.BooleanVar(value=False)
         self.tool_frame_var = tk.StringVar(value=config.TOOL_FRAME)
         self.circle_frame_var = tk.StringVar(value="Not prepared")
         self.center_pose_var = tk.StringVar(value="Not prepared")
@@ -93,25 +98,75 @@ class CircularMoveGui(tk.Tk):
 
         rz_frame = ttk.LabelFrame(left, text="Start Rz", padding=12)
         rz_frame.pack(fill="x", pady=(10, 0))
-        rz_entry = ttk.Entry(rz_frame, width=12, textvariable=self.rz_var)
-        rz_entry.pack(anchor="w")
-        rz_scale = ttk.Scale(
-            rz_frame,
-            from_=-180,
-            to=180,
-            orient="horizontal",
-            variable=self.rz_var,
-            command=lambda *_: self.rz_var.set(round(self.rz_var.get(), 2)),
+
+        rz_move_frame = ttk.Frame(rz_frame)
+        rz_move_frame.pack(fill="x")
+        ttk.Label(rz_move_frame, text="Rz deg:").pack(side="left", padx=(0, 8))
+        rz_entry = ttk.Entry(rz_move_frame, width=10, textvariable=self.rz_var)
+        rz_entry.pack(side="left", padx=(0, 8))
+        self.move_rz_button = ttk.Button(
+            rz_move_frame, text="Move to Rz", command=self.move_to_rz, state="disabled"
         )
-        rz_scale.pack(fill="x", pady=(8, 0))
+        self.move_rz_button.pack(side="left")
+
+        jog_frame = ttk.Frame(rz_frame)
+        jog_frame.pack(fill="x", pady=(8, 0))
+        ttk.Label(jog_frame, text="Jog (hold):").pack(side="left", padx=(0, 8))
+        self.rz_minus_button = ttk.Button(jog_frame, text="Rz −", width=6, state="disabled")
+        self.rz_plus_button = ttk.Button(jog_frame, text="Rz +", width=6, state="disabled")
+        self.rz_minus_button.pack(side="left", padx=(0, 8))
+        self.rz_plus_button.pack(side="left")
+        self.rz_minus_button.bind("<ButtonPress-1>", lambda _event: self.jog_rz_start("-"))
+        self.rz_minus_button.bind("<ButtonRelease-1>", lambda _event: self.jog_rz_stop())
+        self.rz_plus_button.bind("<ButtonPress-1>", lambda _event: self.jog_rz_start("+"))
+        self.rz_plus_button.bind("<ButtonRelease-1>", lambda _event: self.jog_rz_stop())
+
+        z_frame = ttk.LabelFrame(left, text="Z Jog", padding=12)
+        z_frame.pack(fill="x", pady=(10, 0))
+
+        step_frame = ttk.Frame(z_frame)
+        step_frame.pack(fill="x")
+        ttk.Label(step_frame, text="Step mm:").pack(side="left", padx=(0, 8))
+        self.z_step_buttons = []
+        for step in (0.5, 1, 5, 10):
+            radio = ttk.Radiobutton(
+                step_frame,
+                text=str(step),
+                value=float(step),
+                variable=self.z_step_var,
+                state="disabled",
+            )
+            radio.pack(side="left", padx=(0, 6))
+            self.z_step_buttons.append(radio)
+
+        z_switch_frame = ttk.Frame(z_frame)
+        z_switch_frame.pack(fill="x", pady=(8, 0))
+        self.z_enable_check = ttk.Checkbutton(
+            z_switch_frame,
+            text="Enable Jog",
+            variable=self.z_jog_enabled_var,
+            command=lambda: self.set_busy(self._busy),
+            state="disabled",
+        )
+        self.z_enable_check.pack(side="left", padx=(0, 12))
+        self.z_minus_button = ttk.Button(
+            z_switch_frame, text="Z −", width=6, command=lambda: self.jog_z("-"), state="disabled"
+        )
+        self.z_plus_button = ttk.Button(
+            z_switch_frame, text="Z +", width=6, command=lambda: self.jog_z("+"), state="disabled"
+        )
+        self.z_minus_button.pack(side="left", padx=(0, 8))
+        self.z_plus_button.pack(side="left")
 
         buttons = ttk.Frame(left)
         buttons.pack(fill="x", pady=(12, 0))
-        self.init_button = ttk.Button(buttons, text="Initialize Scanning", command=self.initialize_scanning)
+        self.init_button = ttk.Button(buttons, text="Initialize", command=self.initialize_devices)
+        self.set_radius_button = ttk.Button(buttons, text="Set Radius", command=self.set_radius, state="disabled")
         self.start_button = ttk.Button(buttons, text="Start Scan", command=self.start_scan, state="disabled")
         self.stop_button = ttk.Button(buttons, text="Stop", command=self.stop_scan, state="disabled")
         self.exit_button = ttk.Button(buttons, text="Exit", command=self.on_close)
         self.init_button.pack(side="left", padx=(0, 8))
+        self.set_radius_button.pack(side="left", padx=(0, 8))
         self.start_button.pack(side="left", padx=(0, 8))
         self.stop_button.pack(side="left", padx=(0, 8))
         self.exit_button.pack(side="left")
@@ -154,6 +209,7 @@ class CircularMoveGui(tk.Tk):
     def save_settings(self):
         settings = {key: entry.get() for key, entry in self.inputs.items()}
         settings["CIRCLE_RZ_DEG"] = str(self.rz_var.get())
+        settings["Z_JOG_STEP_MM"] = str(self.z_step_var.get())
         with SETTINGS_PATH.open("w", encoding="utf-8") as file:
             json.dump(settings, file, indent=2)
 
@@ -198,7 +254,7 @@ class CircularMoveGui(tk.Tk):
         except Exception:
             self.circle_frame_var.set("Invalid tool frame")
 
-    def initialize_scanning(self):
+    def initialize_devices(self):
         if self.worker and self.worker.is_alive():
             return
         try:
@@ -210,11 +266,11 @@ class CircularMoveGui(tk.Tk):
         self.stop_event.clear()
         self.set_busy(True)
         self.progress_var.set("0/0")
-        self.log("Initializing circular scan")
-        self.worker = threading.Thread(target=self.run_initialize, daemon=True)
+        self.log("Initializing devices")
+        self.worker = threading.Thread(target=self.run_initialize_devices, daemon=True)
         self.worker.start()
 
-    def run_initialize(self):
+    def run_initialize_devices(self):
         try:
             with contextlib.redirect_stdout(self):
                 start_time = datetime.now()
@@ -223,11 +279,40 @@ class CircularMoveGui(tk.Tk):
                     self.laser,
                     self.dobot,
                     self.feed_thread,
-                    real_start_pose,
+                    self.real_start_pose,
+                ) = circularmove.initialize_devices(self.report_path)
+                self.devices_ready = True
+                print("Devices initialized. Press Set Radius to move the arm.")
+        except Exception as error:
+            self.log(f"ERROR: {error}")
+        finally:
+            self.log_queue.put(self.done_token)
+
+    def set_radius(self):
+        if self.worker and self.worker.is_alive():
+            return
+        if not self.devices_ready or self.dobot is None:
+            messagebox.showerror("Not Initialized", "Initialize devices before setting radius.")
+            return
+        try:
+            self.read_parameters()
+        except Exception as error:
+            messagebox.showerror("Invalid Parameters", str(error))
+            return
+
+        self.set_busy(True)
+        self.log("Setting radius (moving arm)")
+        self.worker = threading.Thread(target=self.run_set_radius, daemon=True)
+        self.worker.start()
+
+    def run_set_radius(self):
+        try:
+            with contextlib.redirect_stdout(self):
+                (
                     self.radius_pose,
                     self.center_pose,
                     self.circle_tool_frame,
-                ) = circularmove.initialize(self.report_path)
+                ) = circularmove.set_radius(self.dobot, self.report_path)
 
                 self.center_pose = list(self.center_pose)
                 self.center_pose[5] = config.CIRCLE_RZ_DEG
@@ -240,7 +325,7 @@ class CircularMoveGui(tk.Tk):
                 )
                 self.queue_status("progress", f"0/{len(self.poses)}")
                 self.prepared = True
-                print("Circular scan initialized")
+                print("Radius set. Ready to scan.")
         except Exception as error:
             self.log(f"ERROR: {error}")
         finally:
@@ -358,10 +443,154 @@ class CircularMoveGui(tk.Tk):
             except Exception as error:
                 self.log(f"ERROR: {error}")
 
+    def _jog_ready(self):
+        return (
+            self.prepared
+            and self.dobot is not None
+            and self.center_pose is not None
+            and not (self.worker and self.worker.is_alive())
+        )
+
+    def _sync_center_pose_and_poses(self, indices):
+        # Re-read the settled pose, update the changed components of the circle
+        # center, and regenerate the circle poses. Tk vars are touched via the
+        # queue so this is safe to call from a worker thread.
+        pose = circularmove.get_circle_tool_cartesian_pose(self.dobot)
+        for index in indices:
+            self.center_pose[index] = pose[index]
+        config.CIRCLE_RZ_DEG = self.center_pose[5]
+        self.poses = circularmove.generate_tool_center_circle_poses(
+            self.center_pose,
+            total_steps=config.CIRCLE_TOTAL_STEPS,
+            arc_deg=config.CIRCLE_ARC_DEG,
+        )
+        self.queue_status("rz", round(self.center_pose[5], 2))
+        self.queue_status("center", self.center_pose)
+        self.queue_status("progress", f"0/{len(self.poses)}")
+
+    def jog_rz_start(self, direction):
+        # Hold-to-jog: rotate Rz continuously while the button is pressed.
+        # Only allowed once initialized and while no scan/init worker is running.
+        if not self._jog_ready():
+            return
+        try:
+            self.dobot.dashboard.MoveJog(
+                f"Rz{direction}",
+                coordtype=1,
+                user=config.CIRCLE_USER_INDEX,
+                tool=config.CIRCLE_TOOL_INDEX,
+            )
+        except Exception as error:
+            self.log(f"ERROR: {error}")
+
+    def jog_rz_stop(self):
+        if self.dobot is None:
+            return
+        try:
+            self.dobot.dashboard.MoveJog()  # empty axis stops the jog
+        except Exception as error:
+            self.log(f"ERROR: {error}")
+            return
+
+        if not self.prepared or self.center_pose is None:
+            return
+        try:
+            self._sync_center_pose_and_poses([5])
+        except Exception as error:
+            self.log(f"ERROR: {error}")
+
+    def move_to_rz(self):
+        if not self._jog_ready():
+            return
+        try:
+            target_rz = float(self.rz_var.get())
+        except (tk.TclError, ValueError):
+            messagebox.showerror("Invalid Rz", "Enter a numeric Rz value")
+            return
+
+        self.set_busy(True)
+        self.worker = threading.Thread(target=self._run_move_to_rz, args=(target_rz,), daemon=True)
+        self.worker.start()
+
+    def _run_move_to_rz(self, target_rz):
+        try:
+            with contextlib.redirect_stdout(self):
+                target = list(self.center_pose)
+                target[5] = target_rz
+                print("Move to Rz:", target_rz)
+                circularmove.run_step(
+                    self.dobot,
+                    target,
+                    user=config.CIRCLE_USER_INDEX,
+                    tool=config.CIRCLE_TOOL_INDEX,
+                    acceleration=config.CIRCLE_ACCELERATION_RATIO,
+                    velocity=config.CIRCLE_VELOCITY_RATIO,
+                    cp=config.CIRCLE_CP,
+                    circle_tool_frame=self.circle_tool_frame,
+                )
+                self._sync_center_pose_and_poses([5])
+        except Exception as error:
+            self.log(f"ERROR: {error}")
+        finally:
+            self.log_queue.put(self.done_token)
+
+    def jog_z(self, direction):
+        if not self._jog_ready() or not self.z_jog_enabled_var.get():
+            return
+        try:
+            step = float(self.z_step_var.get())
+        except (tk.TclError, ValueError):
+            return
+        dz = step if direction == "+" else -step
+
+        self.set_busy(True)
+        self.worker = threading.Thread(target=self._run_jog_z, args=(dz,), daemon=True)
+        self.worker.start()
+
+    def _run_jog_z(self, dz):
+        try:
+            with contextlib.redirect_stdout(self):
+                self.dobot.SetTool(config.CIRCLE_TOOL_INDEX, self.circle_tool_frame)
+                self.dobot.ActivateTool(config.CIRCLE_TOOL_INDEX)
+                result = self.dobot.dashboard.RelMovLUser(
+                    0,
+                    0,
+                    dz,
+                    0,
+                    0,
+                    0,
+                    user=config.CIRCLE_USER_INDEX,
+                    tool=config.CIRCLE_TOOL_INDEX,
+                    v=config.CIRCLE_VELOCITY_RATIO,
+                )
+                print("RelMovLUser z jog:", result)
+                if not self.dobot.WaitCommandDone(result):
+                    raise RuntimeError("Z jog move failed or timed out")
+                self._sync_center_pose_and_poses([0, 1, 2])
+        except Exception as error:
+            self.log(f"ERROR: {error}")
+        finally:
+            self.log_queue.put(self.done_token)
+
     def set_busy(self, busy):
-        self.init_button.configure(state="disabled" if busy else "normal")
+        self._busy = busy
+        self.init_button.configure(state="normal" if not busy and not self.devices_ready else "disabled")
+        self.set_radius_button.configure(
+            state="normal" if not busy and self.devices_ready else "disabled"
+        )
         self.start_button.configure(state="normal" if self.prepared and not busy else "disabled")
         self.stop_button.configure(state="normal" if self.running or self.prepared else "disabled")
+        jog_ready = self.prepared and not busy and self.dobot is not None
+        jog_state = "normal" if jog_ready else "disabled"
+        self.rz_minus_button.configure(state=jog_state)
+        self.rz_plus_button.configure(state=jog_state)
+        self.move_rz_button.configure(state=jog_state)
+        self.z_enable_check.configure(state=jog_state)
+        for radio in self.z_step_buttons:
+            radio.configure(state=jog_state)
+        z_state = "normal" if jog_ready and self.z_jog_enabled_var.get() else "disabled"
+        self.z_minus_button.configure(state=z_state)
+        self.z_plus_button.configure(state=z_state)
 
     def queue_status(self, kind, value):
         self.log_queue.put(("status", kind, value))
@@ -392,6 +621,8 @@ class CircularMoveGui(tk.Tk):
                     self.center_pose_var.set(str(value))
                 elif kind == "progress":
                     self.progress_var.set(str(value))
+                elif kind == "rz":
+                    self.rz_var.set(value)
             else:
                 self.log_text.insert("end", str(item).rstrip() + "\n")
                 self.log_text.see("end")
