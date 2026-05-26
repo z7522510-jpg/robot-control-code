@@ -28,6 +28,7 @@ class CircularMoveGui(tk.Tk):
         self.devices_ready = False
         self.prepared = False
         self.running = False
+        self.radius_returned = True
         self.stop_event = threading.Event()
         self.log_queue = queue.Queue()
         self.done_token = object()
@@ -340,6 +341,7 @@ class CircularMoveGui(tk.Tk):
 
         self.stop_event.clear()
         self.running = True
+        self.radius_returned = False
         self.set_busy(True)
         self.log("Starting circular scan")
         self.worker = threading.Thread(target=self.run_scan, daemon=True)
@@ -366,6 +368,7 @@ class CircularMoveGui(tk.Tk):
                     velocity=config.CIRCLE_VELOCITY_RATIO,
                     cp=config.CIRCLE_CP,
                     circle_tool_frame=self.circle_tool_frame,
+                    stop_event=self.stop_event,
                 )
                 circularmove.report_current_pose(self.dobot, self.report_path, "start pose", start_pose)
                 self.queue_status("progress", f"1/{total}")
@@ -387,6 +390,7 @@ class CircularMoveGui(tk.Tk):
                         velocity=config.CIRCLE_VELOCITY_RATIO,
                         cp=config.CIRCLE_CP,
                         circle_tool_frame=self.circle_tool_frame,
+                        stop_event=self.stop_event,
                     )
                     circularmove.report_current_pose(
                         self.dobot,
@@ -404,14 +408,24 @@ class CircularMoveGui(tk.Tk):
                     self.radius_pose,
                 )
         except Exception as error:
-            self.log(f"ERROR: {error}")
+            if self.stop_event.is_set():
+                self.log(f"Scan stopped: {error}")
+                try:
+                    self.return_to_radius_pose()
+                except Exception as return_error:
+                    self.log(f"ERROR: {return_error}")
+            else:
+                self.log(f"ERROR: {error}")
         finally:
             if self.report_path is not None:
                 with self.report_path.open("a", encoding="utf-8") as file:
                     file.write(f"\nFinish time: {datetime.now().isoformat(timespec='seconds')}\n")
             if self.laser is not None:
                 self.laser.stop_safely()
-            self.log("Circular scan finished")
+            if self.stop_event.is_set():
+                self.log("Circular scan stopped")
+            else:
+                self.log("Circular scan finished")
             self.log_queue.put(self.done_token)
 
     def return_to_radius_pose(self):
@@ -433,10 +447,26 @@ class CircularMoveGui(tk.Tk):
         print("MovJ return radius pose:", move_result)
         if not self.dobot.WaitCommandDone(move_result):
             raise RuntimeError("Return to radius-adjusted pose failed or timed out")
+        self.radius_returned = True
+
+    def request_robot_stop(self):
+        self.stop_event.set()
+        if self.laser is not None:
+            try:
+                self.laser.stop_safely()
+            except Exception as error:
+                self.log(f"ERROR stopping laser: {error}")
+        if self.dobot is None:
+            return
+        try:
+            stop_result = self.dobot.dashboard.Stop()
+            self.log(f"Stop: {stop_result}")
+        except Exception as error:
+            self.log(f"ERROR stopping robot: {error}")
 
     def stop_scan(self):
         self.log("Stop requested")
-        self.stop_event.set()
+        self.request_robot_stop()
         if not self.running:
             try:
                 self.return_to_radius_pose()
@@ -629,13 +659,14 @@ class CircularMoveGui(tk.Tk):
         self.after(100, self.drain_log)
 
     def on_close(self):
-        self.stop_event.set()
+        self.request_robot_stop()
         if self.worker and self.worker.is_alive():
             self.worker.join(timeout=120)
-        try:
-            self.return_to_radius_pose()
-        except Exception as error:
-            self.log(f"ERROR: {error}")
+        if not (self.worker and self.worker.is_alive()) and not self.radius_returned:
+            try:
+                self.return_to_radius_pose()
+            except Exception as error:
+                self.log(f"ERROR: {error}")
         if self.laser is not None:
             try:
                 self.laser.close()
