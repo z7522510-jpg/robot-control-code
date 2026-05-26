@@ -6,7 +6,6 @@
 #3. wait
 #uutill everything are done, change wavelength
 
-import math
 import re
 from datetime import datetime
 from pathlib import Path
@@ -20,7 +19,6 @@ from Laser import connect_laser
 
 CURRENT_POSE_DIR = Path(__file__).with_name("currentpose")
 REPORT_POSE_USER_INDEX = 0
-REPORT_POSE_TOOL_INDEX = 0
 
 
 def get_circle_center_tool_frame():
@@ -42,13 +40,15 @@ def create_current_pose_report(start_time):
         file.write(f"Start time: {start_time.isoformat(timespec='seconds')}\n")
         file.write(f"TOOL_INDEX: {config.TOOL_INDEX}\n")
         file.write(f"TOOL_FRAME: {config.TOOL_FRAME}\n")
+        file.write(f"CIRCLE_TOOL_INDEX: {config.CIRCLE_TOOL_INDEX}\n")
         file.write(f"Circle center tool frame: {get_circle_center_tool_frame()}\n")
         file.write(f"CIRCLE_RADIUS_MM: {config.CIRCLE_RADIUS_MM}\n")
         file.write(f"CIRCLE_END_DEG: {config.CIRCLE_END_DEG}\n")
         file.write(f"CIRCLE_TOTAL_STEPS: {config.CIRCLE_TOTAL_STEPS}\n")
         file.write(
             "Reported current pose frame: "
-            f"user={REPORT_POSE_USER_INDEX}, tool={REPORT_POSE_TOOL_INDEX}\n"
+            f"user={REPORT_POSE_USER_INDEX}, tool={config.TOOL_INDEX}, "
+            f"tool_frame={config.TOOL_FRAME}\n"
         )
         file.write("\n")
 
@@ -56,22 +56,22 @@ def create_current_pose_report(start_time):
     return path
 
 
-def get_default_tool_cartesian_pose(dobot):
+def get_config_tool_cartesian_pose(dobot):
     recv = dobot.dashboard.GetPose(
         user=REPORT_POSE_USER_INDEX,
-        tool=REPORT_POSE_TOOL_INDEX,
+        tool=config.TOOL_INDEX,
     )
-    print("GetPose(user=0, tool=0):", recv)
+    print(f"GetPose(user={REPORT_POSE_USER_INDEX}, tool={config.TOOL_INDEX}):", recv)
     values = [float(num) for num in re.findall(r"-?\d+(?:\.\d+)?", recv)]
     if len(values) >= 7 and int(values[0]) == 0:
         return values[1:7]
     if len(values) >= 6:
         return values[:6]
-    raise ValueError("GetPose(user=0, tool=0) failed: " + recv)
+    raise ValueError(f"GetPose(user={REPORT_POSE_USER_INDEX}, tool={config.TOOL_INDEX}) failed: " + recv)
 
 
 def report_current_pose(dobot, report_path, label, target_pose=None):
-    current_pose = get_default_tool_cartesian_pose(dobot)
+    current_pose = get_config_tool_cartesian_pose(dobot)
     line = f"{datetime.now().isoformat(timespec='seconds')} | {label} | current_pose={current_pose}"
     if target_pose is not None:
         line += f" | target_pose={target_pose}"
@@ -92,12 +92,12 @@ def initialize():
             config.SPEED_RATIO,
         )
 
-        # For circular motion, the active TCP is a virtual point below the
-        # original tool end. Holding this point fixed lets the real tool end
-        # swing around it as rx/ry/rz changes.
+        # Keep TOOL_INDEX as the real tool frame for reports, and use a
+        # separate CIRCLE_TOOL_INDEX as the temporary circle-center TCP.
+        dobot.SetTool(config.TOOL_INDEX, config.TOOL_FRAME)
         circle_tool_frame = get_circle_center_tool_frame()
-        dobot.SetTool(config.TOOL_INDEX, circle_tool_frame)
-        dobot.ActivateTool(config.TOOL_INDEX)
+        dobot.SetTool(config.CIRCLE_TOOL_INDEX, circle_tool_frame)
+        dobot.ActivateTool(config.CIRCLE_TOOL_INDEX)
 
         saved_start_pose = dobot.GetCurrentPose()
         print("Saved start pose:", saved_start_pose)
@@ -122,7 +122,7 @@ def get_initial_pose(dobot, saved_start_pose):
         dobot,
         target_pose,
         config.CIRCLE_USER_INDEX,
-        config.TOOL_INDEX,
+        config.CIRCLE_TOOL_INDEX,
         config.CIRCLE_ACCELERATION_RATIO,
         config.CIRCLE_VELOCITY_RATIO,
         config.CIRCLE_CP,
@@ -216,36 +216,6 @@ def ask_circle_end_angle():
     return end_angle
 
 
-def generate_xz_circle_poses(
-    initial_pose,
-    radius,
-    angle_step_deg,
-    end_angle_deg,
-    rx,
-    start_ry,
-    rz,
-):
-    initial_x = initial_pose[0]
-    fixed_y = initial_pose[1]
-    initial_z = initial_pose[2]
-
-    poses = []
-    current_angle = 0
-    angle_ry = start_ry
-    end_angle = math.radians(end_angle_deg)
-    angle_step = math.radians(angle_step_deg)
-
-    while current_angle < end_angle:
-        x = initial_x + radius * math.sin(current_angle)
-        z = initial_z + radius * math.cos(current_angle) - radius
-        poses.append([x, fixed_y, z, rx, angle_ry, rz])
-
-        angle_ry += angle_step_deg
-        current_angle += angle_step
-
-    return poses
-
-
 def generate_tool_center_circle_poses(
     initial_pose,
     angle_step_deg,
@@ -270,8 +240,6 @@ def generate_tool_center_circle_poses(
 
 
 def run_experiment():
-    # Ask circle params before initialize(): the radius is baked into the
-    # virtual circle-center tool frame that initialize() sets up.
     ask_circle_radius()
     end_angle_deg = ask_circle_end_angle()
     total_steps = ask_circle_total_steps()
@@ -283,7 +251,7 @@ def run_experiment():
     report_current_pose(dobot, report_path, "initial_pose", initial_pose)
 
     user = config.CIRCLE_USER_INDEX
-    tool = config.TOOL_INDEX
+    tool = config.CIRCLE_TOOL_INDEX
     acceleration = config.CIRCLE_ACCELERATION_RATIO
     velocity = config.CIRCLE_VELOCITY_RATIO
     cp = config.CIRCLE_CP

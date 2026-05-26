@@ -21,11 +21,13 @@ TOTAL_DISTANCE_MM  = 4
 LOOP_REPEAT_COUNT = 1
 STEP_WAIT_SECONDS = 0.150
 
-# Tool frame for SetTool, format: "{x,y,z,rx,ry,rz}".
+# Real tool frame for normal activation and current-pose reports,
+# format: "{x,y,z,rx,ry,rz}".
 TOOL_INDEX = 1
 TOOL_FRAME = "{1.34,3.09056,218.6788,0,0,86}"
 
 # Circular move.
+CIRCLE_TOOL_INDEX = 2
 CIRCLE_USER_INDEX = 0
 CIRCLE_ACCELERATION_RATIO = 20
 CIRCLE_VELOCITY_RATIO = 20
