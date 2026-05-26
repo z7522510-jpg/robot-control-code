@@ -320,6 +320,23 @@ def run_experiment():
             )
             report_current_pose(dobot, report_path, f"circle point {index}/{len(poses)}", pose)
 
+        print("Return to radius-adjusted vertical pose:", radius_pose)
+        dobot.SetTool(config.TOOL_INDEX, config.TOOL_FRAME)
+        dobot.ActivateTool(config.TOOL_INDEX)
+        move_result = dobot.dashboard.MovJ(
+            *radius_pose,
+            0,
+            user=config.CIRCLE_USER_INDEX,
+            tool=config.TOOL_INDEX,
+            a=acceleration,
+            v=velocity,
+            cp=cp,
+        )
+        print("MovJ return radius pose:", move_result)
+        if not dobot.WaitCommandDone(move_result):
+            raise RuntimeError("Return to radius-adjusted pose failed or timed out")
+        report_current_pose(dobot, report_path, "return radius_adjusted_pose", radius_pose)
+
     finally:
         with report_path.open("a", encoding="utf-8") as file:
             file.write(f"\nFinish time: {datetime.now().isoformat(timespec='seconds')}\n")
