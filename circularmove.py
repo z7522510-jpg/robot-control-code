@@ -7,6 +7,7 @@
 #uutill everything are done, change wavelength
 
 import math
+import re
 from datetime import datetime
 from pathlib import Path
 from time import sleep
@@ -18,6 +19,8 @@ from Laser import connect_laser
 
 
 CURRENT_POSE_DIR = Path(__file__).with_name("currentpose")
+REPORT_POSE_USER_INDEX = 0
+REPORT_POSE_TOOL_INDEX = 0
 
 
 def get_circle_center_tool_frame():
@@ -43,14 +46,32 @@ def create_current_pose_report(start_time):
         file.write(f"CIRCLE_RADIUS_MM: {config.CIRCLE_RADIUS_MM}\n")
         file.write(f"CIRCLE_END_DEG: {config.CIRCLE_END_DEG}\n")
         file.write(f"CIRCLE_TOTAL_STEPS: {config.CIRCLE_TOTAL_STEPS}\n")
+        file.write(
+            "Reported current pose frame: "
+            f"user={REPORT_POSE_USER_INDEX}, tool={REPORT_POSE_TOOL_INDEX}\n"
+        )
         file.write("\n")
 
     print("Current pose report:", path)
     return path
 
 
+def get_default_tool_cartesian_pose(dobot):
+    recv = dobot.dashboard.GetPose(
+        user=REPORT_POSE_USER_INDEX,
+        tool=REPORT_POSE_TOOL_INDEX,
+    )
+    print("GetPose(user=0, tool=0):", recv)
+    values = [float(num) for num in re.findall(r"-?\d+(?:\.\d+)?", recv)]
+    if len(values) >= 7 and int(values[0]) == 0:
+        return values[1:7]
+    if len(values) >= 6:
+        return values[:6]
+    raise ValueError("GetPose(user=0, tool=0) failed: " + recv)
+
+
 def report_current_pose(dobot, report_path, label, target_pose=None):
-    current_pose = dobot.GetCurrentPose()
+    current_pose = get_default_tool_cartesian_pose(dobot)
     line = f"{datetime.now().isoformat(timespec='seconds')} | {label} | current_pose={current_pose}"
     if target_pose is not None:
         line += f" | target_pose={target_pose}"
