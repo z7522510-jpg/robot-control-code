@@ -83,6 +83,8 @@ class CircularMoveGui(tk.Tk):
             ("Acceleration Ratio", "CIRCLE_ACCELERATION_RATIO", config.CIRCLE_ACCELERATION_RATIO),
             ("Velocity Ratio", "CIRCLE_VELOCITY_RATIO", config.CIRCLE_VELOCITY_RATIO),
             ("CP", "CIRCLE_CP", config.CIRCLE_CP),
+            ("Trigger DO Index", "TRIGGER_DO_INDEX", config.TRIGGER_DO_INDEX),
+            ("Trigger Pulse Seconds", "TRIGGER_PULSE_SECONDS", config.TRIGGER_PULSE_SECONDS),
             ("Tool Frame", "TOOL_FRAME", config.TOOL_FRAME),
         ]
 
@@ -187,6 +189,8 @@ class CircularMoveGui(tk.Tk):
         config.CIRCLE_ACCELERATION_RATIO = int(float(values["CIRCLE_ACCELERATION_RATIO"]))
         config.CIRCLE_VELOCITY_RATIO = int(float(values["CIRCLE_VELOCITY_RATIO"]))
         config.CIRCLE_CP = int(float(values["CIRCLE_CP"]))
+        config.TRIGGER_DO_INDEX = int(float(values["TRIGGER_DO_INDEX"]))
+        config.TRIGGER_PULSE_SECONDS = float(values["TRIGGER_PULSE_SECONDS"])
         config.TOOL_FRAME = values["TOOL_FRAME"]
         config.CIRCLE_RZ_DEG = float(self.rz_var.get())
 
@@ -204,6 +208,10 @@ class CircularMoveGui(tk.Tk):
             raise ValueError("Acceleration and Velocity Ratio must be greater than 0")
         if config.CIRCLE_CP < 0:
             raise ValueError("CP cannot be negative")
+        if config.TRIGGER_DO_INDEX <= 0:
+            raise ValueError("Trigger DO Index must be greater than 0")
+        if config.TRIGGER_PULSE_SECONDS <= 0:
+            raise ValueError("Trigger Pulse Seconds must be greater than 0")
         if len(circularmove._tool_frame_values(config.TOOL_FRAME)) != 6:
             raise ValueError("Tool Frame must have 6 values")
 
@@ -353,6 +361,8 @@ class CircularMoveGui(tk.Tk):
                     cp=config.CIRCLE_CP,
                     circle_tool_frame=self.circle_tool_frame,
                     stop_event=self.stop_event,
+                    trigger_do_index=config.TRIGGER_DO_INDEX,
+                    trigger_pulse_seconds=config.TRIGGER_PULSE_SECONDS,
                 )
                 circularmove.report_current_pose(self.dobot, self.report_path, "start pose", start_pose)
                 self.queue_status("progress", f"1/{total}")
@@ -375,6 +385,8 @@ class CircularMoveGui(tk.Tk):
                         cp=config.CIRCLE_CP,
                         circle_tool_frame=self.circle_tool_frame,
                         stop_event=self.stop_event,
+                        trigger_do_index=config.TRIGGER_DO_INDEX,
+                        trigger_pulse_seconds=config.TRIGGER_PULSE_SECONDS,
                     )
                     circularmove.report_current_pose(
                         self.dobot,
