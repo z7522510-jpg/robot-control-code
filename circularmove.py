@@ -88,32 +88,6 @@ def report_current_pose(dobot, report_path, label, target_pose=None):
     return current_pose
 
 
-def change_radius(dobot):
-    radius_delta = config.CIRCLE_RADIUS_MM - config.SUBCUTANEOUS_SCAN_DISTANCE_MM
-    if abs(radius_delta) < 1e-9:
-        print("Radius move skipped: radius already matches subcutaneous distance")
-        return None
-
-    dobot.SetTool(config.TOOL_INDEX, config.TOOL_FRAME)
-    dobot.ActivateTool(config.TOOL_INDEX)
-    move_result = dobot.dashboard.RelMovLUser(
-        0,
-        0,
-        radius_delta,
-        0,
-        0,
-        0,
-        user=config.CIRCLE_USER_INDEX,
-        tool=config.TOOL_INDEX,
-        v=config.CIRCLE_VELOCITY_RATIO,
-    )
-    print("RelMovLUser radius move:", move_result)
-    if not dobot.WaitCommandDone(move_result):
-        raise RuntimeError("RelMovLUser radius move failed or timed out")
-
-    return move_result
-
-
 def get_circle_tool_cartesian_pose(dobot):
     recv = dobot.dashboard.GetPose(
         user=config.CIRCLE_USER_INDEX,
@@ -191,7 +165,27 @@ def initialize_devices(report_path):
 def set_radius(dobot, report_path):
     # Step 2: move the arm by the radius delta, then build the virtual
     # circle-center tool frame and read the circle center pose.
-    change_radius(dobot)
+    radius_delta = config.CIRCLE_RADIUS_MM - config.SUBCUTANEOUS_SCAN_DISTANCE_MM
+    if abs(radius_delta) < 1e-9:
+        print("Radius move skipped: radius already matches subcutaneous distance")
+    else:
+        dobot.SetTool(config.TOOL_INDEX, config.TOOL_FRAME)
+        dobot.ActivateTool(config.TOOL_INDEX)
+        move_result = dobot.dashboard.RelMovLUser(
+            0,
+            0,
+            radius_delta,
+            0,
+            0,
+            0,
+            user=config.CIRCLE_USER_INDEX,
+            tool=config.TOOL_INDEX,
+            v=config.CIRCLE_VELOCITY_RATIO,
+        )
+        print("RelMovLUser radius move:", move_result)
+        if not dobot.WaitCommandDone(move_result):
+            raise RuntimeError("RelMovLUser radius move failed or timed out")
+
     radius_pose = get_config_tool_cartesian_pose(dobot)
     print("Radius-adjusted real tool pose:", radius_pose)
     report_current_pose(dobot, report_path, "radius_adjusted_pose", radius_pose)
@@ -236,6 +230,8 @@ def run_step(
     cp,
     circle_tool_frame,
     stop_event=None,
+    trigger_do_index=None,
+    trigger_pulse_seconds=None,
 ):
     dobot.SetTool(tool, circle_tool_frame)
     dobot.ActivateTool(tool)
@@ -249,6 +245,12 @@ def run_step(
         cp=cp,
     )
     print("MovJ:", move_result)
+
+    if trigger_do_index is not None and trigger_pulse_seconds is not None:
+        pulse_ms = int(round(trigger_pulse_seconds * 1000))
+        do_result = dobot.dashboard.DO(trigger_do_index, 1, pulse_ms)
+        print(f"DO({trigger_do_index},1,{pulse_ms}ms):", do_result)
+
     if stop_event is None:
         done = dobot.WaitCommandDone(move_result)
     else:
@@ -344,6 +346,25 @@ def ask_circle_total_steps():
     return total_steps
 
 
+def ask_pulse():
+    do_index = int(input(f"Trigger DO index [{config.TRIGGER_DO_INDEX}]: ") or config.TRIGGER_DO_INDEX)
+    pulse_seconds = float(
+        input(f"Trigger pulse seconds [{config.TRIGGER_PULSE_SECONDS}]: ")
+        or config.TRIGGER_PULSE_SECONDS
+    )
+
+    if do_index <= 0:
+        raise ValueError("Trigger DO index must be greater than 0")
+    if pulse_seconds <= 0:
+        raise ValueError("Trigger pulse seconds must be greater than 0")
+
+    config.TRIGGER_DO_INDEX = do_index
+    config.TRIGGER_PULSE_SECONDS = pulse_seconds
+    print("TRIGGER_DO_INDEX =", config.TRIGGER_DO_INDEX)
+    print("TRIGGER_PULSE_SECONDS =", config.TRIGGER_PULSE_SECONDS)
+    return config.TRIGGER_DO_INDEX, config.TRIGGER_PULSE_SECONDS
+
+
 def generate_tool_center_circle_poses(
     center_pose,
     total_steps,
@@ -371,6 +392,7 @@ def run_experiment():
     ask_subcutaneous_scan_distance()
     ask_circle_radius()
     total_steps = ask_circle_total_steps()
+    ask_pulse()
 
     start_time = datetime.now()
     report_path = create_current_pose_report(start_time)
@@ -417,6 +439,8 @@ def run_experiment():
             velocity=velocity,
             cp=cp,
             circle_tool_frame=circle_tool_frame,
+            trigger_do_index=config.TRIGGER_DO_INDEX,
+            trigger_pulse_seconds=config.TRIGGER_PULSE_SECONDS,
         )
         report_current_pose(dobot, report_path, "start pose", start_pose)
 
@@ -435,6 +459,8 @@ def run_experiment():
                 velocity=velocity,
                 cp=cp,
                 circle_tool_frame=circle_tool_frame,
+                trigger_do_index=config.TRIGGER_DO_INDEX,
+                trigger_pulse_seconds=config.TRIGGER_PULSE_SECONDS,
             )
             report_current_pose(dobot, report_path, f"circle point {index}/{len(poses)}", pose)
 
