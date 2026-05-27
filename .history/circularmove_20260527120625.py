@@ -390,11 +390,6 @@ def run_experiment():
     velocity = config.CIRCLE_VELOCITY_RATIO
     cp = config.CIRCLE_CP
 
-    # Force the scan Rz so the sweep stays in the chosen plane (rz≈0 -> XZ).
-    # Matches the GUI, which also overrides center_pose[5] with CIRCLE_RZ_DEG.
-    center_pose = list(center_pose)
-    center_pose[5] = config.CIRCLE_RZ_DEG
-
     poses = generate_tool_center_circle_poses(
         center_pose,
         total_steps=total_steps,

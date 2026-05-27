@@ -473,6 +473,12 @@ class CircularMoveGui(tk.Tk):
         for index in indices:
             self.center_pose[index] = pose[index]
         config.CIRCLE_RZ_DEG = self.center_pose[5]
+        # The new Rz becomes the saved Rz: the radius/home pose shares the same
+        # orientation (tool 1 and tool 2 differ only in z), so returning later
+        # comes back to this Rz too.
+        if self.radius_pose is not None:
+            self.radius_pose = list(self.radius_pose)
+            self.radius_pose[5] = self.center_pose[5]
         self.poses = circularmove.generate_tool_center_circle_poses(
             self.center_pose,
             total_steps=config.CIRCLE_TOTAL_STEPS,
