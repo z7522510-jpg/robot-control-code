@@ -130,41 +130,9 @@ def get_circle_tool_cartesian_pose(dobot):
     )
 
 
-def level_xz_plane(dobot):
-    # Set rx=180, ry=0 (keep x/y/z and rz) so the probe points straight down and
-    # the circle's XZ sweep plane stays horizontal. Done in the flange frame
-    # (user=0, tool=0) so it needs no tool definition.
-    recv = dobot.dashboard.GetPose(user=0, tool=0)
-    print("GetPose(user=0, tool=0):", recv)
-    values = [float(num) for num in re.findall(r"-?\d+(?:\.\d+)?", recv)]
-    if len(values) >= 7 and int(values[0]) == 0:
-        pose = values[1:7]
-    elif len(values) >= 6:
-        pose = values[:6]
-    else:
-        raise ValueError("GetPose(user=0, tool=0) failed: " + recv)
-
-    pose[3] = 180.0
-    pose[4] = 0.0
-    move_result = dobot.dashboard.MovJ(
-        *pose,
-        0,
-        user=0,
-        tool=0,
-        a=config.CIRCLE_ACCELERATION_RATIO,
-        v=config.CIRCLE_VELOCITY_RATIO,
-        cp=config.CIRCLE_CP,
-    )
-    print("Level XZ plane (rx=180, ry=0):", move_result)
-    if not dobot.WaitCommandDone(move_result):
-        raise RuntimeError("Level XZ plane move failed or timed out")
-    return pose
-
-
 def initialize_devices(report_path):
     # Step 1: connect laser + robot, activate the configured tool, and record
-    # the real tool start pose. Leveling (rx=180, ry=0) is a separate manual
-    # step via level_xz_plane().
+    # the real tool start pose. No circular-motion setup or arm move yet.
     laser = connect_laser(config.LASER_DLL_PATH)
     try:
         laser.initialize_laser(config.LASER_WAVELENGTH_NM)
@@ -207,7 +175,6 @@ def set_radius(dobot, report_path):
 def initialize(report_path):
     laser, dobot, feed_thread, real_start_pose = initialize_devices(report_path)
     try:
-        level_xz_plane(dobot)
         radius_pose, center_pose, circle_tool_frame = set_radius(dobot, report_path)
     except Exception:
         try:
