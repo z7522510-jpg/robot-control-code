@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(git merge *)",
-      "Bash(awk '{print $2}')"
+      "Bash(awk '{print $2}')",
+      "Bash(git stash *)",
+      "Bash(git pull *)",
+      "Bash(python -c \"import json; print\\(json.load\\(open\\('circularmove_ui_settings.json', encoding='utf-8'\\)\\)\\)\")",
+      "Bash(git add *)"
     ]
   }
 }

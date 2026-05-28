@@ -363,25 +363,6 @@ def ask_circle_total_steps():
     return total_steps
 
 
-def ask_pulse():
-    do_index = int(input(f"Trigger DO index [{config.TRIGGER_DO_INDEX}]: ") or config.TRIGGER_DO_INDEX)
-    pulse_seconds = float(
-        input(f"Trigger pulse seconds [{config.TRIGGER_PULSE_SECONDS}]: ")
-        or config.TRIGGER_PULSE_SECONDS
-    )
-
-    if do_index <= 0:
-        raise ValueError("Trigger DO index must be greater than 0")
-    if pulse_seconds <= 0:
-        raise ValueError("Trigger pulse seconds must be greater than 0")
-
-    config.TRIGGER_DO_INDEX = do_index
-    config.TRIGGER_PULSE_SECONDS = pulse_seconds
-    print("TRIGGER_DO_INDEX =", config.TRIGGER_DO_INDEX)
-    print("TRIGGER_PULSE_SECONDS =", config.TRIGGER_PULSE_SECONDS)
-    return config.TRIGGER_DO_INDEX, config.TRIGGER_PULSE_SECONDS
-
-
 def generate_tool_center_circle_poses(
     center_pose,
     total_steps,
@@ -400,6 +381,9 @@ def generate_tool_center_circle_poses(
 
     for step_index in range(total_steps + 1):
         rx = center_rx + start_offset - step_index * angle_step
+        # Wrap into (-180, 180]: rx=-186.67 -> 173.33 etc. Same physical
+        # orientation, but stays in the Euler range the controller accepts.
+        rx = ((rx + 180.0) % 360.0) - 180.0
         poses.append([center_x, center_y, center_z, rx, center_ry, center_rz])
 
     return poses
@@ -409,7 +393,6 @@ def run_experiment():
     ask_subcutaneous_scan_distance()
     ask_circle_radius()
     total_steps = ask_circle_total_steps()
-    ask_pulse()
 
     start_time = datetime.now()
     report_path = create_current_pose_report(start_time)
