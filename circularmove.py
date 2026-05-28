@@ -21,13 +21,22 @@ CURRENT_POSE_DIR = Path(__file__).with_name("currentpose")
 REPORT_POSE_USER_INDEX = 0
 
 
-def get_circle_center_tool_frame():
-    values = _tool_frame_values(config.TOOL_FRAME)
+def get_circle_center_tool_frame(tool_frame=None):
+    values = _tool_frame_values(tool_frame or config.TOOL_FRAME)
     if len(values) != 6:
         raise ValueError("TOOL_FRAME must have 6 values: x, y, z, rx, ry, rz")
 
     values[2] += config.CIRCLE_RADIUS_MM
-    return "{" + ",".join(str(value) for value in values) + "}"
+    return _format_tool_frame(values)
+
+
+def get_probe_angle_tool_frame(tool_frame, angle_deg):
+    values = _tool_frame_values(tool_frame)
+    if len(values) != 6:
+        raise ValueError("TOOL_FRAME must have 6 values: x, y, z, rx, ry, rz")
+
+    values[5] -= angle_deg
+    return _format_tool_frame(values)
 
 
 def create_current_pose_report(start_time):
@@ -106,8 +115,8 @@ def get_circle_tool_cartesian_pose(dobot):
 
 def level_xz_plane(dobot):
     # Set rx=180, ry=0 (keep x/y/z and rz) so the probe points straight down and
-    # the circle's XZ sweep plane stays horizontal. Done in the flange frame
-    # (user=0, tool=0) so it needs no tool definition.
+    # the circular scan starts from a level orientation. Done in the flange
+    # frame (user=0, tool=0) so it needs no tool definition.
     recv = dobot.dashboard.GetPose(user=0, tool=0)
     print("GetPose(user=0, tool=0):", recv)
     values = [float(num) for num in re.findall(r"-?\d+(?:\.\d+)?", recv)]
@@ -129,13 +138,13 @@ def level_xz_plane(dobot):
         v=config.CIRCLE_VELOCITY_RATIO,
         cp=config.CIRCLE_CP,
     )
-    print("Level XZ plane (rx=180, ry=0):", move_result)
+    print("Level probe orientation (rx=180, ry=0):", move_result)
     if not dobot.WaitCommandDone(move_result):
-        raise RuntimeError("Level XZ plane move failed or timed out")
+        raise RuntimeError("Level probe orientation move failed or timed out")
     return pose
 
 
-def initialize_devices(report_path):
+def initialize_devices(report_path, tool_frame=None):
     # Step 1: connect laser + robot, activate the configured tool, and record
     # the real tool start pose. Leveling (rx=180, ry=0) is a separate manual
     # step via level_xz_plane().
@@ -147,7 +156,8 @@ def initialize_devices(report_path):
             config.SPEED_RATIO,
         )
 
-        dobot.SetTool(config.TOOL_INDEX, config.TOOL_FRAME)
+        active_tool_frame = tool_frame or config.TOOL_FRAME
+        dobot.SetTool(config.TOOL_INDEX, active_tool_frame)
         dobot.ActivateTool(config.TOOL_INDEX)
         real_start_pose = get_config_tool_cartesian_pose(dobot)
         print("Real tool start pose:", real_start_pose)
@@ -162,14 +172,15 @@ def initialize_devices(report_path):
     return laser, dobot, feed_thread, real_start_pose
 
 
-def set_radius(dobot, report_path):
+def set_radius(dobot, report_path, tool_frame=None):
     # Step 2: move the arm by the radius delta, then build the virtual
     # circle-center tool frame and read the circle center pose.
+    active_tool_frame = tool_frame or config.TOOL_FRAME
     radius_delta = config.CIRCLE_RADIUS_MM - config.SUBCUTANEOUS_SCAN_DISTANCE_MM
     if abs(radius_delta) < 1e-9:
         print("Radius move skipped: radius already matches subcutaneous distance")
     else:
-        dobot.SetTool(config.TOOL_INDEX, config.TOOL_FRAME)
+        dobot.SetTool(config.TOOL_INDEX, active_tool_frame)
         dobot.ActivateTool(config.TOOL_INDEX)
         move_result = dobot.dashboard.RelMovLUser(
             0,
@@ -190,7 +201,7 @@ def set_radius(dobot, report_path):
     print("Radius-adjusted real tool pose:", radius_pose)
     report_current_pose(dobot, report_path, "radius_adjusted_pose", radius_pose)
 
-    circle_tool_frame = get_circle_center_tool_frame()
+    circle_tool_frame = get_circle_center_tool_frame(active_tool_frame)
     dobot.SetTool(config.CIRCLE_TOOL_INDEX, circle_tool_frame)
     dobot.ActivateTool(config.CIRCLE_TOOL_INDEX)
     center_pose = get_circle_tool_cartesian_pose(dobot)
@@ -201,6 +212,8 @@ def set_radius(dobot, report_path):
 def initialize(report_path):
     laser, dobot, feed_thread, real_start_pose = initialize_devices(report_path)
     try:
+        config.CIRCLE_RZ_DEG = real_start_pose[5]
+        print("Default scan Rz from real_start_pose:", config.CIRCLE_RZ_DEG)
         level_xz_plane(dobot)
         radius_pose, center_pose, circle_tool_frame = set_radius(dobot, report_path)
     except Exception:
@@ -218,6 +231,10 @@ def _tool_frame_values(tool_frame):
         for value in tool_frame.strip("{}").split(",")
         if value.strip()
     ]
+
+
+def _format_tool_frame(values):
+    return "{" + ",".join(str(value) for value in values) + "}"
 
 
 def run_step(
@@ -382,8 +399,8 @@ def generate_tool_center_circle_poses(
     angle_step = arc_deg / total_steps
 
     for step_index in range(total_steps + 1):
-        ry = center_ry + start_offset - step_index * angle_step
-        poses.append([center_x, center_y, center_z, center_rx, ry, center_rz])
+        rx = center_rx + start_offset - step_index * angle_step
+        poses.append([center_x, center_y, center_z, rx, center_ry, center_rz])
 
     return poses
 
@@ -412,10 +429,12 @@ def run_experiment():
     velocity = config.CIRCLE_VELOCITY_RATIO
     cp = config.CIRCLE_CP
 
-    # Force the scan Rz so the sweep stays in the chosen plane (rz≈0 -> XZ).
-    # Matches the GUI, which also overrides center_pose[5] with CIRCLE_RZ_DEG.
+    # Use the Rz remembered after initialization so the scan starts from the
+    # active tool-frame orientation unless the operator changes it later.
     center_pose = list(center_pose)
     center_pose[5] = config.CIRCLE_RZ_DEG
+    radius_pose = list(radius_pose)
+    radius_pose[5] = config.CIRCLE_RZ_DEG
 
     poses = generate_tool_center_circle_poses(
         center_pose,

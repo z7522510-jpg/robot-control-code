@@ -37,13 +37,20 @@ class CircularMoveGui(tk.Tk):
         self.radius_pose = None
         self.center_pose = None
         self.circle_tool_frame = None
+        self.effective_tool_frame = config.TOOL_FRAME
         self.poses = []
+        self.robot_target_rz = 0.0
 
         self._busy = False
         self.settings = self.load_settings()
         self.inputs = {}
-        self.rz_var = tk.DoubleVar(value=float(self.settings.get("CIRCLE_RZ_DEG", config.CIRCLE_RZ_DEG)))
+        self.probe_angle_var = tk.DoubleVar(value=self.initial_probe_angle())
         self.tool_frame_var = tk.StringVar(value=config.TOOL_FRAME)
+        self.effective_tool_frame_var = tk.StringVar(value="Not prepared")
+        self.base_tool_rz_var = tk.StringVar(value="0.0")
+        self.effective_tool_rz_var = tk.StringVar(value="0.0")
+        self.target_pose_rz_var = tk.StringVar(value=str(self.robot_target_rz))
+        self.probe_angle_status_var = tk.StringVar(value="0.0")
         self.circle_frame_var = tk.StringVar(value="Not prepared")
         self.center_pose_var = tk.StringVar(value="Not prepared")
         self.progress_var = tk.StringVar(value="0/0")
@@ -94,33 +101,38 @@ class CircularMoveGui(tk.Tk):
             entry.insert(0, str(self.settings.get(key, default)))
             entry.grid(row=row, column=1, sticky="ew", pady=4)
             self.inputs[key] = entry
+            if key == "TOOL_FRAME":
+                entry.bind("<KeyRelease>", lambda _event: self.update_static_status())
+                entry.bind("<FocusOut>", lambda _event: self.update_static_status())
 
         params.columnconfigure(1, weight=1)
 
-        rz_frame = ttk.LabelFrame(left, text="Start Rz", padding=12)
+        rz_frame = ttk.LabelFrame(left, text="Probe Rotation", padding=12)
         rz_frame.pack(fill="x", pady=(10, 0))
 
         rz_move_frame = ttk.Frame(rz_frame)
         rz_move_frame.pack(fill="x")
-        ttk.Label(rz_move_frame, text="Rz deg:").pack(side="left", padx=(0, 8))
-        rz_entry = ttk.Entry(rz_move_frame, width=10, textvariable=self.rz_var)
+        ttk.Label(rz_move_frame, text="Desired angle deg:").pack(side="left", padx=(0, 8))
+        rz_entry = ttk.Entry(rz_move_frame, width=10, textvariable=self.probe_angle_var)
         rz_entry.pack(side="left", padx=(0, 8))
+        rz_entry.bind("<KeyRelease>", lambda _event: self.update_static_status())
+        rz_entry.bind("<FocusOut>", lambda _event: self.update_static_status())
         self.move_rz_button = ttk.Button(
-            rz_move_frame, text="Move to Rz", command=self.move_to_rz, state="disabled"
+            rz_move_frame, text="Apply Angle", command=self.apply_probe_angle, state="disabled"
         )
         self.move_rz_button.pack(side="left")
 
         jog_frame = ttk.Frame(rz_frame)
         jog_frame.pack(fill="x", pady=(8, 0))
-        ttk.Label(jog_frame, text="Jog (hold):").pack(side="left", padx=(0, 8))
-        self.rz_minus_button = ttk.Button(jog_frame, text="Rz −", width=6, state="disabled")
-        self.rz_plus_button = ttk.Button(jog_frame, text="Rz +", width=6, state="disabled")
+        ttk.Label(jog_frame, text="Step: 1 deg").pack(side="left", padx=(0, 8))
+        self.rz_minus_button = ttk.Button(
+            jog_frame, text="Angle -", width=9, command=lambda: self.adjust_probe_angle(-1), state="disabled"
+        )
+        self.rz_plus_button = ttk.Button(
+            jog_frame, text="Angle +", width=9, command=lambda: self.adjust_probe_angle(1), state="disabled"
+        )
         self.rz_minus_button.pack(side="left", padx=(0, 8))
         self.rz_plus_button.pack(side="left")
-        self.rz_minus_button.bind("<ButtonPress-1>", lambda _event: self.jog_rz_start("-"))
-        self.rz_minus_button.bind("<ButtonRelease-1>", lambda _event: self.jog_rz_stop())
-        self.rz_plus_button.bind("<ButtonPress-1>", lambda _event: self.jog_rz_start("+"))
-        self.rz_plus_button.bind("<ButtonRelease-1>", lambda _event: self.jog_rz_stop())
 
         buttons = ttk.Frame(left)
         buttons.pack(fill="x", pady=(12, 0))
@@ -142,7 +154,12 @@ class CircularMoveGui(tk.Tk):
         status.columnconfigure(1, weight=1)
 
         status_rows = [
-            ("Tool Frame", self.tool_frame_var),
+            ("Base Tool Frame", self.tool_frame_var),
+            ("Effective Tool Frame", self.effective_tool_frame_var),
+            ("Base Tool Rz", self.base_tool_rz_var),
+            ("Effective Tool Rz", self.effective_tool_rz_var),
+            ("Robot Target Rz", self.target_pose_rz_var),
+            ("Probe Angle", self.probe_angle_status_var),
             ("Circle Center Tool Frame", self.circle_frame_var),
             ("Central Circle Point", self.center_pose_var),
             ("Progress", self.progress_var),
@@ -172,9 +189,13 @@ class CircularMoveGui(tk.Tk):
         except Exception:
             return {}
 
+    def initial_probe_angle(self):
+        return float(self.settings.get("CIRCLE_PROBE_ANGLE_DEG", config.CIRCLE_PROBE_ANGLE_DEG))
+
     def save_settings(self):
         settings = {key: entry.get() for key, entry in self.inputs.items()}
-        settings["CIRCLE_RZ_DEG"] = str(self.rz_var.get())
+        settings["CIRCLE_PROBE_ANGLE_DEG"] = str(self.probe_angle_var.get())
+        settings["CIRCLE_RZ_DEG"] = str(self.robot_target_rz)
         with SETTINGS_PATH.open("w", encoding="utf-8") as file:
             json.dump(settings, file, indent=2)
 
@@ -192,7 +213,12 @@ class CircularMoveGui(tk.Tk):
         config.TRIGGER_DO_INDEX = int(float(values["TRIGGER_DO_INDEX"]))
         config.TRIGGER_PULSE_SECONDS = float(values["TRIGGER_PULSE_SECONDS"])
         config.TOOL_FRAME = values["TOOL_FRAME"]
-        config.CIRCLE_RZ_DEG = float(self.rz_var.get())
+        config.CIRCLE_RZ_DEG = self.robot_target_rz
+        config.CIRCLE_PROBE_ANGLE_DEG = float(self.probe_angle_var.get())
+        self.effective_tool_frame = circularmove.get_probe_angle_tool_frame(
+            config.TOOL_FRAME,
+            config.CIRCLE_PROBE_ANGLE_DEG,
+        )
 
         if config.CIRCLE_RADIUS_MM <= 0:
             raise ValueError("Radius mm must be greater than 0")
@@ -219,10 +245,30 @@ class CircularMoveGui(tk.Tk):
         self.update_static_status()
 
     def update_static_status(self):
-        self.tool_frame_var.set(config.TOOL_FRAME)
+        base_tool_frame = config.TOOL_FRAME
+        if "TOOL_FRAME" in self.inputs:
+            base_tool_frame = self.inputs["TOOL_FRAME"].get().strip() or config.TOOL_FRAME
+
+        self.tool_frame_var.set(base_tool_frame)
         try:
-            self.circle_frame_var.set(circularmove.get_circle_center_tool_frame())
+            angle = float(self.probe_angle_var.get())
+            base_values = circularmove._tool_frame_values(base_tool_frame)
+            self.effective_tool_frame = circularmove.get_probe_angle_tool_frame(
+                base_tool_frame,
+                angle,
+            )
+            effective_values = circularmove._tool_frame_values(self.effective_tool_frame)
+
+            self.effective_tool_frame_var.set(self.effective_tool_frame)
+            self.base_tool_rz_var.set(round(base_values[5], 3))
+            self.effective_tool_rz_var.set(round(effective_values[5], 3))
+            self.target_pose_rz_var.set(round(self.robot_target_rz, 3))
+            self.probe_angle_status_var.set(round(angle, 3))
+            self.circle_frame_var.set(circularmove.get_circle_center_tool_frame(self.effective_tool_frame))
         except Exception:
+            self.effective_tool_frame_var.set("Invalid tool frame")
+            self.base_tool_rz_var.set("Invalid")
+            self.effective_tool_rz_var.set("Invalid")
             self.circle_frame_var.set("Invalid tool frame")
 
     def initialize_devices(self):
@@ -251,7 +297,12 @@ class CircularMoveGui(tk.Tk):
                     self.dobot,
                     self.feed_thread,
                     self.real_start_pose,
-                ) = circularmove.initialize_devices(self.report_path)
+                ) = circularmove.initialize_devices(
+                    self.report_path,
+                    tool_frame=self.effective_tool_frame,
+                )
+                config.CIRCLE_RZ_DEG = self.robot_target_rz
+                print("Robot target pose Rz:", config.CIRCLE_RZ_DEG)
                 self.devices_ready = True
                 print("Devices initialized. Press Set Radius to move the arm.")
         except Exception as error:
@@ -283,10 +334,16 @@ class CircularMoveGui(tk.Tk):
                     self.radius_pose,
                     self.center_pose,
                     self.circle_tool_frame,
-                ) = circularmove.set_radius(self.dobot, self.report_path)
+                ) = circularmove.set_radius(
+                    self.dobot,
+                    self.report_path,
+                    tool_frame=self.effective_tool_frame,
+                )
 
                 self.center_pose = list(self.center_pose)
-                self.center_pose[5] = config.CIRCLE_RZ_DEG
+                self.center_pose[5] = self.robot_target_rz
+                self.radius_pose = list(self.radius_pose)
+                self.radius_pose[5] = self.robot_target_rz
                 self.queue_status("center", self.center_pose)
 
                 self.poses = circularmove.generate_tool_center_circle_poses(
@@ -310,7 +367,7 @@ class CircularMoveGui(tk.Tk):
             return
 
         self.set_busy(True)
-        self.log("Leveling XZ plane (rx=180, ry=0)")
+        self.log("Leveling probe orientation (rx=180, ry=0)")
         self.worker = threading.Thread(target=self.run_level_xz, daemon=True)
         self.worker.start()
 
@@ -318,7 +375,7 @@ class CircularMoveGui(tk.Tk):
         try:
             with contextlib.redirect_stdout(self):
                 circularmove.level_xz_plane(self.dobot)
-                print("XZ plane leveled (rx=180, ry=0)")
+                print("Probe orientation leveled (rx=180, ry=0)")
         except Exception as error:
             self.log(f"ERROR: {error}")
         finally:
@@ -430,7 +487,7 @@ class CircularMoveGui(tk.Tk):
 
         print("Return to radius-adjusted vertical pose:", self.radius_pose)
         # MovJ names user/tool explicitly below, so only define the frame here.
-        self.dobot.SetTool(config.TOOL_INDEX, config.TOOL_FRAME)
+        self.dobot.SetTool(config.TOOL_INDEX, self.effective_tool_frame)
         move_result = self.dobot.dashboard.MovJ(
             *self.radius_pose,
             0,
@@ -477,81 +534,73 @@ class CircularMoveGui(tk.Tk):
             and not (self.worker and self.worker.is_alive())
         )
 
-    def _sync_center_pose_and_poses(self, indices):
-        # Re-read the settled pose, update the changed components of the circle
-        # center, and regenerate the circle poses. Tk vars are touched via the
-        # queue so this is safe to call from a worker thread.
-        pose = circularmove.get_circle_tool_cartesian_pose(self.dobot)
-        for index in indices:
-            self.center_pose[index] = pose[index]
-        config.CIRCLE_RZ_DEG = self.center_pose[5]
-        # The new Rz becomes the saved Rz: the radius/home pose shares the same
-        # orientation (tool 1 and tool 2 differ only in z), so returning later
-        # comes back to this Rz too.
-        if self.radius_pose is not None:
-            self.radius_pose = list(self.radius_pose)
-            self.radius_pose[5] = self.center_pose[5]
+    def _sync_center_pose_and_poses(self):
+        # Re-read the settled poses after a compensated tool-frame change, then
+        # keep robot target Rz fixed at the canonical scan value.
+        self.center_pose = list(circularmove.get_circle_tool_cartesian_pose(self.dobot))
+        self.center_pose[5] = self.robot_target_rz
+
+        self.dobot.SetTool(config.TOOL_INDEX, self.effective_tool_frame)
+        self.radius_pose = list(circularmove.get_config_tool_cartesian_pose(self.dobot))
+        self.radius_pose[5] = self.robot_target_rz
+        config.CIRCLE_RZ_DEG = self.robot_target_rz
+
         self.poses = circularmove.generate_tool_center_circle_poses(
             self.center_pose,
             total_steps=config.CIRCLE_TOTAL_STEPS,
             arc_deg=config.CIRCLE_ARC_DEG,
         )
-        self.queue_status("rz", round(self.center_pose[5], 2))
+        self.queue_status("angle", round(float(self.probe_angle_var.get()), 2))
         self.queue_status("center", self.center_pose)
         self.queue_status("progress", f"0/{len(self.poses)}")
 
-    def jog_rz_start(self, direction):
-        # Hold-to-jog: rotate Rz continuously while the button is pressed.
-        # Only allowed once initialized and while no scan/init worker is running.
-        if not self._jog_ready():
-            return
+    def adjust_probe_angle(self, direction):
         try:
-            # coordtype=2 (tool coordinate) + the ORIGINAL tool frame: Rz rotates
-            # about the real probe's own Z axis. The circle center sits on that
-            # same Z axis, so it does not move — we just re-read it on stop.
-            self.dobot.dashboard.MoveJog(
-                f"Rz{direction}",
-                coordtype=2,
-                tool=config.TOOL_INDEX,
-            )
-        except Exception as error:
-            self.log(f"ERROR: {error}")
-
-    def jog_rz_stop(self):
-        if self.dobot is None:
-            return
-        try:
-            self.dobot.dashboard.MoveJog()  # empty axis stops the jog
-        except Exception as error:
-            self.log(f"ERROR: {error}")
-            return
-
-        if not self.prepared or self.center_pose is None:
-            return
-        try:
-            self._sync_center_pose_and_poses([5])
-        except Exception as error:
-            self.log(f"ERROR: {error}")
-
-    def move_to_rz(self):
-        if not self._jog_ready():
-            return
-        try:
-            target_rz = float(self.rz_var.get())
+            current_angle = float(self.probe_angle_var.get())
         except (tk.TclError, ValueError):
-            messagebox.showerror("Invalid Rz", "Enter a numeric Rz value")
+            messagebox.showerror("Invalid Angle", "Enter a numeric probe angle")
+            return
+
+        self.probe_angle_var.set(round(current_angle + direction, 3))
+        self.apply_probe_angle()
+
+    def apply_probe_angle(self):
+        if not self._jog_ready():
+            return
+        try:
+            self.read_parameters()
+            target_angle = float(self.probe_angle_var.get())
+        except (tk.TclError, ValueError):
+            messagebox.showerror("Invalid Angle", "Enter a numeric probe angle")
+            return
+        except Exception as error:
+            messagebox.showerror("Invalid Parameters", str(error))
             return
 
         self.set_busy(True)
-        self.worker = threading.Thread(target=self._run_move_to_rz, args=(target_rz,), daemon=True)
+        self.worker = threading.Thread(target=self._run_apply_probe_angle, args=(target_angle,), daemon=True)
         self.worker.start()
 
-    def _run_move_to_rz(self, target_rz):
+    def _run_apply_probe_angle(self, target_angle):
         try:
             with contextlib.redirect_stdout(self):
-                target = list(self.center_pose)
-                target[5] = target_rz
-                print("Move to Rz:", target_rz)
+                self.effective_tool_frame = circularmove.get_probe_angle_tool_frame(
+                    config.TOOL_FRAME,
+                    target_angle,
+                )
+                self.circle_tool_frame = circularmove.get_circle_center_tool_frame(
+                    self.effective_tool_frame
+                )
+
+                self.dobot.SetTool(config.TOOL_INDEX, self.effective_tool_frame)
+                self.dobot.SetTool(config.CIRCLE_TOOL_INDEX, self.circle_tool_frame)
+                self.dobot.ActivateTool(config.CIRCLE_TOOL_INDEX)
+
+                target = list(circularmove.get_circle_tool_cartesian_pose(self.dobot))
+                target[5] = self.robot_target_rz
+                print("Apply probe angle:", target_angle)
+                print("Effective tool frame:", self.effective_tool_frame)
+                print("Move robot target Rz to:", self.robot_target_rz)
                 circularmove.run_step(
                     self.dobot,
                     target,
@@ -562,7 +611,8 @@ class CircularMoveGui(tk.Tk):
                     cp=config.CIRCLE_CP,
                     circle_tool_frame=self.circle_tool_frame,
                 )
-                self._sync_center_pose_and_poses([5])
+                self._sync_center_pose_and_poses()
+                self.queue_status("rotation", None)
         except Exception as error:
             self.log(f"ERROR: {error}")
         finally:
@@ -614,8 +664,11 @@ class CircularMoveGui(tk.Tk):
                     self.center_pose_var.set(str(value))
                 elif kind == "progress":
                     self.progress_var.set(str(value))
-                elif kind == "rz":
-                    self.rz_var.set(value)
+                elif kind == "angle":
+                    self.probe_angle_var.set(value)
+                    self.update_static_status()
+                elif kind == "rotation":
+                    self.update_static_status()
             else:
                 self.log_text.insert("end", str(item).rstrip() + "\n")
                 self.log_text.see("end")

@@ -42,4 +42,7 @@ CIRCLE_RADIUS_MM = 350
 CIRCLE_ARC_DEG = 120
 CIRCLE_TOTAL_STEPS = 18
 CIRCLE_RX_DEG = 180
+# Robot target Rz for compensated probe rotation. The GUI keeps this at 0 and
+# applies physical probe rotation by offsetting the tool-frame Rz instead.
 CIRCLE_RZ_DEG = 0
+CIRCLE_PROBE_ANGLE_DEG = 0
