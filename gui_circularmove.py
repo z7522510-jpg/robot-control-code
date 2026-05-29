@@ -407,20 +407,34 @@ class CircularMoveGui(tk.Tk):
                     return
 
                 start_pose = self.poses[0]
-                print("Move to start pose:", start_pose)
-                circularmove.run_step(
-                    self.dobot,
-                    start_pose,
+                start_mid_pose = list(self.center_pose)
+                start_mid_pose[3] = (
+                    (self.center_pose[3] + config.CIRCLE_ARC_DEG / 4 + 180.0) % 360.0
+                ) - 180.0
+                print("Move circular to start pose:", start_pose)
+                self.dobot.SetTool(config.CIRCLE_TOOL_INDEX, self.circle_tool_frame)
+                self.dobot.ActivateTool(config.CIRCLE_TOOL_INDEX)
+                move_result = self.dobot.dashboard.Arc(
+                    *start_mid_pose,
+                    *start_pose,
+                    0,
                     user=config.CIRCLE_USER_INDEX,
                     tool=config.CIRCLE_TOOL_INDEX,
-                    acceleration=config.CIRCLE_ACCELERATION_RATIO,
-                    velocity=config.CIRCLE_VELOCITY_RATIO,
+                    a=config.CIRCLE_ACCELERATION_RATIO,
+                    v=config.CIRCLE_VELOCITY_RATIO,
                     cp=config.CIRCLE_CP,
-                    circle_tool_frame=self.circle_tool_frame,
-                    stop_event=self.stop_event,
-                    trigger_do_index=config.TRIGGER_DO_INDEX,
-                    trigger_pulse_seconds=config.TRIGGER_PULSE_SECONDS,
                 )
+                print("Arc start:", move_result)
+                if config.TRIGGER_DO_INDEX is not None and config.TRIGGER_PULSE_SECONDS is not None:
+                    pulse_ms = int(round(config.TRIGGER_PULSE_SECONDS * 1000))
+                    do_result = self.dobot.dashboard.DO(config.TRIGGER_DO_INDEX, 1, pulse_ms)
+                    print(f"DO({config.TRIGGER_DO_INDEX},1,{pulse_ms}ms):", do_result)
+                if not circularmove.wait_command_done_or_stop(
+                    self.dobot,
+                    move_result,
+                    self.stop_event,
+                ):
+                    raise RuntimeError("Move circular to start pose failed or timed out")
                 circularmove.report_current_pose(self.dobot, self.report_path, "start pose", start_pose)
                 self.queue_status("progress", f"1/{total}")
 
@@ -453,7 +467,31 @@ class CircularMoveGui(tk.Tk):
                     )
                     self.queue_status("progress", f"{index}/{total}")
 
-                self.return_to_radius_pose()
+                return_mid_pose = list(self.center_pose)
+                return_mid_pose[3] = (
+                    (self.center_pose[3] - config.CIRCLE_ARC_DEG / 4 + 180.0) % 360.0
+                ) - 180.0
+                print("Move circular back to radius-adjusted vertical pose:", self.radius_pose)
+                self.dobot.SetTool(config.CIRCLE_TOOL_INDEX, self.circle_tool_frame)
+                self.dobot.ActivateTool(config.CIRCLE_TOOL_INDEX)
+                move_result = self.dobot.dashboard.Arc(
+                    *return_mid_pose,
+                    *self.center_pose,
+                    0,
+                    user=config.CIRCLE_USER_INDEX,
+                    tool=config.CIRCLE_TOOL_INDEX,
+                    a=config.CIRCLE_ACCELERATION_RATIO,
+                    v=config.CIRCLE_VELOCITY_RATIO,
+                    cp=config.CIRCLE_CP,
+                )
+                print("Arc return radius pose:", move_result)
+                if not circularmove.wait_command_done_or_stop(
+                    self.dobot,
+                    move_result,
+                    self.stop_event,
+                ):
+                    raise RuntimeError("Move circular back to radius-adjusted pose failed or timed out")
+                self.radius_returned = True
                 circularmove.report_current_pose(
                     self.dobot,
                     self.report_path,

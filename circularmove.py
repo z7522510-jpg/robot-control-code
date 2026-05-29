@@ -431,19 +431,28 @@ def run_experiment():
             return laser, dobot, feed_thread, real_start_pose, poses
 
         start_pose = poses[0]
-        print("Move to start pose:", start_pose)
-        run_step(
-            dobot,
-            start_pose,
+        start_mid_pose = list(center_pose)
+        start_mid_pose[3] = ((center_pose[3] + config.CIRCLE_ARC_DEG / 4 + 180.0) % 360.0) - 180.0
+        print("Move circular to start pose:", start_pose)
+        dobot.SetTool(tool, circle_tool_frame)
+        dobot.ActivateTool(tool)
+        move_result = dobot.dashboard.Arc(
+            *start_mid_pose,
+            *start_pose,
+            0,
             user=user,
             tool=tool,
-            acceleration=acceleration,
-            velocity=velocity,
+            a=acceleration,
+            v=velocity,
             cp=cp,
-            circle_tool_frame=circle_tool_frame,
-            trigger_do_index=config.TRIGGER_DO_INDEX,
-            trigger_pulse_seconds=config.TRIGGER_PULSE_SECONDS,
         )
+        print("Arc start:", move_result)
+        if config.TRIGGER_DO_INDEX is not None and config.TRIGGER_PULSE_SECONDS is not None:
+            pulse_ms = int(round(config.TRIGGER_PULSE_SECONDS * 1000))
+            do_result = dobot.dashboard.DO(config.TRIGGER_DO_INDEX, 1, pulse_ms)
+            print(f"DO({config.TRIGGER_DO_INDEX},1,{pulse_ms}ms):", do_result)
+        if not dobot.WaitCommandDone(move_result):
+            raise RuntimeError("Move circular to start pose failed or timed out")
         report_current_pose(dobot, report_path, "start pose", start_pose)
 
         for index, pose in enumerate(poses[1:], start=2):
@@ -466,21 +475,24 @@ def run_experiment():
             )
             report_current_pose(dobot, report_path, f"circle point {index}/{len(poses)}", pose)
 
-        print("Return to radius-adjusted vertical pose:", radius_pose)
-        dobot.SetTool(config.TOOL_INDEX, config.TOOL_FRAME)
-        dobot.ActivateTool(config.TOOL_INDEX)
-        move_result = dobot.dashboard.MovJ(
-            *radius_pose,
+        return_mid_pose = list(center_pose)
+        return_mid_pose[3] = ((center_pose[3] - config.CIRCLE_ARC_DEG / 4 + 180.0) % 360.0) - 180.0
+        print("Move circular back to radius-adjusted vertical pose:", radius_pose)
+        dobot.SetTool(tool, circle_tool_frame)
+        dobot.ActivateTool(tool)
+        move_result = dobot.dashboard.Arc(
+            *return_mid_pose,
+            *center_pose,
             0,
-            user=config.CIRCLE_USER_INDEX,
-            tool=config.TOOL_INDEX,
+            user=user,
+            tool=tool,
             a=acceleration,
             v=velocity,
             cp=cp,
         )
-        print("MovJ return radius pose:", move_result)
+        print("Arc return radius pose:", move_result)
         if not dobot.WaitCommandDone(move_result):
-            raise RuntimeError("Return to radius-adjusted pose failed or timed out")
+            raise RuntimeError("Move circular back to radius-adjusted pose failed or timed out")
         report_current_pose(dobot, report_path, "return radius_adjusted_pose", radius_pose)
 
     finally:
