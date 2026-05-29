@@ -434,21 +434,21 @@ def run_experiment():
             return laser, dobot, feed_thread, real_start_pose, poses
 
         start_pose = poses[0]
-        # x/y/z stay at the circle center; only rx changes. Use MovJ — Arc
-        # fails here with err 19 because its three reference points share xyz.
-        print("Move to start pose:", start_pose)
+        print("Move circular to start pose:", start_pose)
         dobot.SetTool(tool, circle_tool_frame)
         dobot.ActivateTool(tool)
-        move_result = dobot.dashboard.MovJ(
+        move_result = dobot.dashboard.Arc(
+            *poses[1],
             *start_pose,
             0,
             user=user,
             tool=tool,
             a=acceleration,
             v=velocity,
-            cp=cp,
+            cp=0,
+            mode=0,
         )
-        print("MovJ start:", move_result)
+        print("Arc start:", move_result)
         if config.TRIGGER_DO_INDEX is not None and config.TRIGGER_PULSE_SECONDS is not None:
             pulse_ms = int(round(config.TRIGGER_PULSE_SECONDS * 1000))
             do_result = dobot.dashboard.DO(config.TRIGGER_DO_INDEX, 1, pulse_ms)
@@ -477,20 +477,21 @@ def run_experiment():
             )
             report_current_pose(dobot, report_path, f"circle point {index}/{len(poses)}", pose)
 
-        # Same rotation-only situation -> MovJ, not Arc.
-        print("Move back to circle center pose:", center_pose)
+        print("Move circular back to circle center pose:", center_pose)
         dobot.SetTool(tool, circle_tool_frame)
         dobot.ActivateTool(tool)
-        move_result = dobot.dashboard.MovJ(
+        move_result = dobot.dashboard.Arc(
+            *poses[-2],
             *center_pose,
             0,
             user=user,
             tool=tool,
             a=acceleration,
             v=velocity,
-            cp=cp,
+            cp=0,
+            mode=0,
         )
-        print("MovJ back to center:", move_result)
+        print("Arc back to center:", move_result)
         if not dobot.WaitCommandDone(move_result):
             raise RuntimeError("Move back to circle center pose failed or timed out")
         report_current_pose(dobot, report_path, "return radius_adjusted_pose", radius_pose)

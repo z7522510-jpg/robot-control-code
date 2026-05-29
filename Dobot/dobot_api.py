@@ -2189,7 +2189,7 @@ class DobotApiDashboard(DobotApi):
         string = string + ')'
         return self.sendRecvMsg(string)
 
-    def Arc(self, a1, b1, c1, d1, e1, f1,  a2, b2, c2, d2, e2, f2, coordinateMode, user=-1, tool=-1, a=-1, v=-1, speed=-1, cp=-1, r=-1):
+    def Arc(self, a1, b1, c1, d1, e1, f1,  a2, b2, c2, d2, e2, f2, coordinateMode, user=-1, tool=-1, a=-1, v=-1, speed=-1, cp=-1, r=-1, mode=-1):
         """
         描述
         从当前位置以圆弧插补⽅式运动⾄⽬标点。
@@ -2257,6 +2257,8 @@ class DobotApiDashboard(DobotApi):
             params.append('r={:d}'.format(r))
         elif cp != -1:
             params.append('cp={:d}'.format(cp))
+        if mode != -1:
+            params.append('mode={:d}'.format(mode))
         for ii in params:
             string = string + ',' + ii
         string = string + ')'
