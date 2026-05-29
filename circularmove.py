@@ -59,6 +59,7 @@ def create_current_pose_report(start_time):
         )
         file.write(f"CIRCLE_ARC_DEG: {config.CIRCLE_ARC_DEG}\n")
         file.write(f"CIRCLE_TOTAL_STEPS: {config.CIRCLE_TOTAL_STEPS}\n")
+        file.write(f"CIRCLE_APPROACH_OFFSET_MM: {config.CIRCLE_APPROACH_OFFSET_MM}\n")
         file.write(
             "Reported current pose frame: "
             f"user={REPORT_POSE_USER_INDEX}, tool={config.TOOL_INDEX}, "
@@ -366,6 +367,18 @@ def ask_circle_total_steps():
     return total_steps
 
 
+def ask_circle_approach_offset():
+    offset = float(
+        input(
+            "Approach offset mm (Y) "
+            f"[{config.CIRCLE_APPROACH_OFFSET_MM}]: "
+        ) or config.CIRCLE_APPROACH_OFFSET_MM
+    )
+    config.CIRCLE_APPROACH_OFFSET_MM = offset
+    print("CIRCLE_APPROACH_OFFSET_MM =", config.CIRCLE_APPROACH_OFFSET_MM)
+    return offset
+
+
 def generate_tool_center_circle_poses(
     center_pose,
     total_steps,
@@ -396,6 +409,7 @@ def run_experiment():
     ask_subcutaneous_scan_distance()
     ask_circle_radius()
     total_steps = ask_circle_total_steps()
+    ask_circle_approach_offset()
 
     start_time = datetime.now()
     report_path = create_current_pose_report(start_time)
@@ -437,7 +451,7 @@ def run_experiment():
         dobot.SetTool(tool, circle_tool_frame)
         dobot.ActivateTool(tool)
 
-        # Step 1: linear sidestep along user X so the subsequent rotation
+        # Step 1: linear sidestep along user Y so the subsequent rotation
         # passes through clear space, not over the subject.
         print(f"Sidestep Y by -{config.CIRCLE_APPROACH_OFFSET_MM} mm")
         sidestep_result = dobot.dashboard.RelMovLUser(
@@ -493,7 +507,7 @@ def run_experiment():
         dobot.SetTool(tool, circle_tool_frame)
         dobot.ActivateTool(tool)
 
-        # Same approach as entering start: sidestep X first, then MovJ.
+        # Same approach as entering start: sidestep Y first, then MovJ.
         print(f"Sidestep Y by {config.CIRCLE_APPROACH_OFFSET_MM} mm")
         sidestep_result = dobot.dashboard.RelMovLUser(
             0, config.CIRCLE_APPROACH_OFFSET_MM, 0, 0, 0, 0,
