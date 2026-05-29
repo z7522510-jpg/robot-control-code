@@ -407,15 +407,13 @@ class CircularMoveGui(tk.Tk):
                     return
 
                 start_pose = self.poses[0]
-                start_mid_pose = list(self.center_pose)
-                start_mid_pose[3] = (
-                    (self.center_pose[3] + config.CIRCLE_ARC_DEG / 4 + 180.0) % 360.0
-                ) - 180.0
-                print("Move circular to start pose:", start_pose)
+                # x/y/z stay at the circle center; only rx changes. That's a
+                # rotation-only move -> MovJ. Arc fails here with err 19 because
+                # its three reference points are all the same xyz.
+                print("Move to start pose:", start_pose)
                 self.dobot.SetTool(config.CIRCLE_TOOL_INDEX, self.circle_tool_frame)
                 self.dobot.ActivateTool(config.CIRCLE_TOOL_INDEX)
-                move_result = self.dobot.dashboard.Arc(
-                    *start_mid_pose,
+                move_result = self.dobot.dashboard.MovJ(
                     *start_pose,
                     0,
                     user=config.CIRCLE_USER_INDEX,
@@ -424,7 +422,7 @@ class CircularMoveGui(tk.Tk):
                     v=config.CIRCLE_VELOCITY_RATIO,
                     cp=config.CIRCLE_CP,
                 )
-                print("Arc start:", move_result)
+                print("MovJ start:", move_result)
                 if config.TRIGGER_DO_INDEX is not None and config.TRIGGER_PULSE_SECONDS is not None:
                     pulse_ms = int(round(config.TRIGGER_PULSE_SECONDS * 1000))
                     do_result = self.dobot.dashboard.DO(config.TRIGGER_DO_INDEX, 1, pulse_ms)
@@ -467,15 +465,11 @@ class CircularMoveGui(tk.Tk):
                     )
                     self.queue_status("progress", f"{index}/{total}")
 
-                return_mid_pose = list(self.center_pose)
-                return_mid_pose[3] = (
-                    (self.center_pose[3] - config.CIRCLE_ARC_DEG / 4 + 180.0) % 360.0
-                ) - 180.0
-                print("Move circular back to radius-adjusted vertical pose:", self.radius_pose)
+                # Same rotation-only situation -> MovJ, not Arc.
+                print("Move back to circle center pose:", self.center_pose)
                 self.dobot.SetTool(config.CIRCLE_TOOL_INDEX, self.circle_tool_frame)
                 self.dobot.ActivateTool(config.CIRCLE_TOOL_INDEX)
-                move_result = self.dobot.dashboard.Arc(
-                    *return_mid_pose,
+                move_result = self.dobot.dashboard.MovJ(
                     *self.center_pose,
                     0,
                     user=config.CIRCLE_USER_INDEX,
@@ -484,13 +478,13 @@ class CircularMoveGui(tk.Tk):
                     v=config.CIRCLE_VELOCITY_RATIO,
                     cp=config.CIRCLE_CP,
                 )
-                print("Arc return radius pose:", move_result)
+                print("MovJ back to center:", move_result)
                 if not circularmove.wait_command_done_or_stop(
                     self.dobot,
                     move_result,
                     self.stop_event,
                 ):
-                    raise RuntimeError("Move circular back to radius-adjusted pose failed or timed out")
+                    raise RuntimeError("Move back to circle center pose failed or timed out")
                 self.radius_returned = True
                 circularmove.report_current_pose(
                     self.dobot,

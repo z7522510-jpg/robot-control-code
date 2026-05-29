@@ -115,25 +115,28 @@ def get_circle_tool_cartesian_pose(dobot):
 
 def level_xz_plane(dobot):
     # Set rx=180, ry=0 (keep x/y/z and rz) so the probe points straight down and
-    # the circular scan starts from a level orientation. Done in the flange
-    # frame (user=0, tool=0) so it needs no tool definition.
-    recv = dobot.dashboard.GetPose(user=0, tool=0)
-    print("GetPose(user=0, tool=0):", recv)
+    # the circular scan starts from a level orientation. Operates in the
+    # configured tool frame (TOOL_INDEX), so the caller must have already
+    # SetTool/ActivateTool'd it (initialize_devices does this).
+    user = REPORT_POSE_USER_INDEX
+    tool = config.TOOL_INDEX
+    recv = dobot.dashboard.GetPose(user=user, tool=tool)
+    print(f"GetPose(user={user}, tool={tool}):", recv)
     values = [float(num) for num in re.findall(r"-?\d+(?:\.\d+)?", recv)]
     if len(values) >= 7 and int(values[0]) == 0:
         pose = values[1:7]
     elif len(values) >= 6:
         pose = values[:6]
     else:
-        raise ValueError("GetPose(user=0, tool=0) failed: " + recv)
+        raise ValueError(f"GetPose(user={user}, tool={tool}) failed: " + recv)
 
     pose[3] = 180.0
     pose[4] = 0.0
     move_result = dobot.dashboard.MovJ(
         *pose,
         0,
-        user=0,
-        tool=0,
+        user=user,
+        tool=tool,
         a=config.CIRCLE_ACCELERATION_RATIO,
         v=config.CIRCLE_VELOCITY_RATIO,
         cp=config.CIRCLE_CP,
@@ -431,13 +434,12 @@ def run_experiment():
             return laser, dobot, feed_thread, real_start_pose, poses
 
         start_pose = poses[0]
-        start_mid_pose = list(center_pose)
-        start_mid_pose[3] = ((center_pose[3] + config.CIRCLE_ARC_DEG / 4 + 180.0) % 360.0) - 180.0
-        print("Move circular to start pose:", start_pose)
+        # x/y/z stay at the circle center; only rx changes. Use MovJ — Arc
+        # fails here with err 19 because its three reference points share xyz.
+        print("Move to start pose:", start_pose)
         dobot.SetTool(tool, circle_tool_frame)
         dobot.ActivateTool(tool)
-        move_result = dobot.dashboard.Arc(
-            *start_mid_pose,
+        move_result = dobot.dashboard.MovJ(
             *start_pose,
             0,
             user=user,
@@ -446,7 +448,7 @@ def run_experiment():
             v=velocity,
             cp=cp,
         )
-        print("Arc start:", move_result)
+        print("MovJ start:", move_result)
         if config.TRIGGER_DO_INDEX is not None and config.TRIGGER_PULSE_SECONDS is not None:
             pulse_ms = int(round(config.TRIGGER_PULSE_SECONDS * 1000))
             do_result = dobot.dashboard.DO(config.TRIGGER_DO_INDEX, 1, pulse_ms)
@@ -475,13 +477,11 @@ def run_experiment():
             )
             report_current_pose(dobot, report_path, f"circle point {index}/{len(poses)}", pose)
 
-        return_mid_pose = list(center_pose)
-        return_mid_pose[3] = ((center_pose[3] - config.CIRCLE_ARC_DEG / 4 + 180.0) % 360.0) - 180.0
-        print("Move circular back to radius-adjusted vertical pose:", radius_pose)
+        # Same rotation-only situation -> MovJ, not Arc.
+        print("Move back to circle center pose:", center_pose)
         dobot.SetTool(tool, circle_tool_frame)
         dobot.ActivateTool(tool)
-        move_result = dobot.dashboard.Arc(
-            *return_mid_pose,
+        move_result = dobot.dashboard.MovJ(
             *center_pose,
             0,
             user=user,
@@ -490,9 +490,9 @@ def run_experiment():
             v=velocity,
             cp=cp,
         )
-        print("Arc return radius pose:", move_result)
+        print("MovJ back to center:", move_result)
         if not dobot.WaitCommandDone(move_result):
-            raise RuntimeError("Move circular back to radius-adjusted pose failed or timed out")
+            raise RuntimeError("Move back to circle center pose failed or timed out")
         report_current_pose(dobot, report_path, "return radius_adjusted_pose", radius_pose)
 
     finally:
