@@ -434,27 +434,40 @@ def run_experiment():
             return laser, dobot, feed_thread, real_start_pose, poses
 
         start_pose = poses[0]
-        print("Move circular to start pose:", start_pose)
         dobot.SetTool(tool, circle_tool_frame)
         dobot.ActivateTool(tool)
-        move_result = dobot.dashboard.Arc(
-            *poses[1],
+
+        # Step 1: linear sidestep along user X so the subsequent rotation
+        # passes through clear space, not over the subject.
+        print(f"Sidestep Y by -{config.CIRCLE_APPROACH_OFFSET_MM} mm")
+        sidestep_result = dobot.dashboard.RelMovLUser(
+            0, -config.CIRCLE_APPROACH_OFFSET_MM, 0, 0, 0, 0,
+            user=user,
+            tool=tool,
+            v=velocity,
+        )
+        print("Sidestep:", sidestep_result)
+        if not dobot.WaitCommandDone(sidestep_result):
+            raise RuntimeError("Sidestep before start pose failed or timed out")
+
+        # Step 2: MovJ to start_pose from the sidestep position.
+        print("Move to start pose:", start_pose)
+        move_result = dobot.dashboard.MovJ(
             *start_pose,
             0,
             user=user,
             tool=tool,
             a=acceleration,
             v=velocity,
-            cp=0,
-            mode=0,
+            cp=cp,
         )
-        print("Arc start:", move_result)
+        print("MovJ start:", move_result)
         if config.TRIGGER_DO_INDEX is not None and config.TRIGGER_PULSE_SECONDS is not None:
             pulse_ms = int(round(config.TRIGGER_PULSE_SECONDS * 1000))
             do_result = dobot.dashboard.DO(config.TRIGGER_DO_INDEX, 1, pulse_ms)
             print(f"DO({config.TRIGGER_DO_INDEX},1,{pulse_ms}ms):", do_result)
         if not dobot.WaitCommandDone(move_result):
-            raise RuntimeError("Move circular to start pose failed or timed out")
+            raise RuntimeError("Move to start pose failed or timed out")
         report_current_pose(dobot, report_path, "start pose", start_pose)
 
         for index, pose in enumerate(poses[1:], start=2):
@@ -477,21 +490,32 @@ def run_experiment():
             )
             report_current_pose(dobot, report_path, f"circle point {index}/{len(poses)}", pose)
 
-        print("Move circular back to circle center pose:", center_pose)
         dobot.SetTool(tool, circle_tool_frame)
         dobot.ActivateTool(tool)
-        move_result = dobot.dashboard.Arc(
-            *poses[-2],
+
+        # Same approach as entering start: sidestep X first, then MovJ.
+        print(f"Sidestep Y by {config.CIRCLE_APPROACH_OFFSET_MM} mm")
+        sidestep_result = dobot.dashboard.RelMovLUser(
+            0, config.CIRCLE_APPROACH_OFFSET_MM, 0, 0, 0, 0,
+            user=user,
+            tool=tool,
+            v=velocity,
+        )
+        print("Sidestep:", sidestep_result)
+        if not dobot.WaitCommandDone(sidestep_result):
+            raise RuntimeError("Sidestep before center pose failed or timed out")
+
+        print("Move back to circle center pose:", center_pose)
+        move_result = dobot.dashboard.MovJ(
             *center_pose,
             0,
             user=user,
             tool=tool,
             a=acceleration,
             v=velocity,
-            cp=0,
-            mode=0,
+            cp=cp,
         )
-        print("Arc back to center:", move_result)
+        print("MovJ back to center:", move_result)
         if not dobot.WaitCommandDone(move_result):
             raise RuntimeError("Move back to circle center pose failed or timed out")
         report_current_pose(dobot, report_path, "return radius_adjusted_pose", radius_pose)

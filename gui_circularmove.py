@@ -86,6 +86,7 @@ class CircularMoveGui(tk.Tk):
             ),
             ("Circle Arc deg", "CIRCLE_ARC_DEG", config.CIRCLE_ARC_DEG),
             ("Total Steps", "CIRCLE_TOTAL_STEPS", config.CIRCLE_TOTAL_STEPS),
+            ("Approach Offset mm (Y)", "CIRCLE_APPROACH_OFFSET_MM", config.CIRCLE_APPROACH_OFFSET_MM),
             ("Speed Ratio", "SPEED_RATIO", config.SPEED_RATIO),
             ("Acceleration Ratio", "CIRCLE_ACCELERATION_RATIO", config.CIRCLE_ACCELERATION_RATIO),
             ("Velocity Ratio", "CIRCLE_VELOCITY_RATIO", config.CIRCLE_VELOCITY_RATIO),
@@ -212,6 +213,7 @@ class CircularMoveGui(tk.Tk):
         config.CIRCLE_CP = int(float(values["CIRCLE_CP"]))
         config.TRIGGER_DO_INDEX = int(float(values["TRIGGER_DO_INDEX"]))
         config.TRIGGER_PULSE_SECONDS = float(values["TRIGGER_PULSE_SECONDS"])
+        config.CIRCLE_APPROACH_OFFSET_MM = float(values["CIRCLE_APPROACH_OFFSET_MM"])
         config.TOOL_FRAME = values["TOOL_FRAME"]
         config.CIRCLE_RZ_DEG = self.robot_target_rz
         config.CIRCLE_PROBE_ANGLE_DEG = float(self.probe_angle_var.get())
@@ -388,6 +390,17 @@ class CircularMoveGui(tk.Tk):
             messagebox.showerror("Not Initialized", "Initialize scanning before starting.")
             return
 
+        # Re-read inputs so runtime tweaks (approach offset, trigger, speed
+        # ratios, etc.) take effect without re-running Initialize / Set Radius.
+        # Note: changing TOOL_FRAME / radius here does not re-define the tool
+        # frame on the controller or regenerate poses — those require redoing
+        # Initialize / Set Radius.
+        try:
+            self.read_parameters()
+        except Exception as error:
+            messagebox.showerror("Invalid Parameters", str(error))
+            return
+
         self.stop_event.clear()
         self.running = True
         self.radius_returned = False
@@ -407,21 +420,38 @@ class CircularMoveGui(tk.Tk):
                     return
 
                 start_pose = self.poses[0]
-                print("Move circular to start pose:", start_pose)
                 self.dobot.SetTool(config.CIRCLE_TOOL_INDEX, self.circle_tool_frame)
                 self.dobot.ActivateTool(config.CIRCLE_TOOL_INDEX)
-                move_result = self.dobot.dashboard.Arc(
-                    *self.poses[1],
+
+                # Step 1: linear sidestep along user X so the subsequent
+                # rotation passes through clear space, not over the subject.
+                print(f"Sidestep Y by -{config.CIRCLE_APPROACH_OFFSET_MM} mm")
+                sidestep_result = self.dobot.dashboard.RelMovLUser(
+                    0, -config.CIRCLE_APPROACH_OFFSET_MM, 0, 0, 0, 0,
+                    user=config.CIRCLE_USER_INDEX,
+                    tool=config.CIRCLE_TOOL_INDEX,
+                    v=config.CIRCLE_VELOCITY_RATIO,
+                )
+                print("Sidestep:", sidestep_result)
+                if not circularmove.wait_command_done_or_stop(
+                    self.dobot,
+                    sidestep_result,
+                    self.stop_event,
+                ):
+                    raise RuntimeError("Sidestep before start pose failed or timed out")
+
+                # Step 2: MovJ to start_pose from the sidestep position.
+                print("Move to start pose:", start_pose)
+                move_result = self.dobot.dashboard.MovJ(
                     *start_pose,
                     0,
                     user=config.CIRCLE_USER_INDEX,
                     tool=config.CIRCLE_TOOL_INDEX,
                     a=config.CIRCLE_ACCELERATION_RATIO,
                     v=config.CIRCLE_VELOCITY_RATIO,
-                    cp=0,
-                    mode=0,
+                    cp=config.CIRCLE_CP,
                 )
-                print("Arc start:", move_result)
+                print("MovJ start:", move_result)
                 if config.TRIGGER_DO_INDEX is not None and config.TRIGGER_PULSE_SECONDS is not None:
                     pulse_ms = int(round(config.TRIGGER_PULSE_SECONDS * 1000))
                     do_result = self.dobot.dashboard.DO(config.TRIGGER_DO_INDEX, 1, pulse_ms)
@@ -464,21 +494,36 @@ class CircularMoveGui(tk.Tk):
                     )
                     self.queue_status("progress", f"{index}/{total}")
 
-                print("Move circular back to circle center pose:", self.center_pose)
                 self.dobot.SetTool(config.CIRCLE_TOOL_INDEX, self.circle_tool_frame)
                 self.dobot.ActivateTool(config.CIRCLE_TOOL_INDEX)
-                move_result = self.dobot.dashboard.Arc(
-                    *self.poses[-2],
+
+                # Same approach as entering start: sidestep X first, then MovJ.
+                print(f"Sidestep Y by {config.CIRCLE_APPROACH_OFFSET_MM} mm")
+                sidestep_result = self.dobot.dashboard.RelMovLUser(
+                    0, config.CIRCLE_APPROACH_OFFSET_MM, 0, 0, 0, 0,
+                    user=config.CIRCLE_USER_INDEX,
+                    tool=config.CIRCLE_TOOL_INDEX,
+                    v=config.CIRCLE_VELOCITY_RATIO,
+                )
+                print("Sidestep:", sidestep_result)
+                if not circularmove.wait_command_done_or_stop(
+                    self.dobot,
+                    sidestep_result,
+                    self.stop_event,
+                ):
+                    raise RuntimeError("Sidestep before center pose failed or timed out")
+
+                print("Move back to circle center pose:", self.center_pose)
+                move_result = self.dobot.dashboard.MovJ(
                     *self.center_pose,
                     0,
                     user=config.CIRCLE_USER_INDEX,
                     tool=config.CIRCLE_TOOL_INDEX,
                     a=config.CIRCLE_ACCELERATION_RATIO,
                     v=config.CIRCLE_VELOCITY_RATIO,
-                    cp=0,
-                    mode=0,
+                    cp=config.CIRCLE_CP,
                 )
-                print("Arc back to center:", move_result)
+                print("MovJ back to center:", move_result)
                 if not circularmove.wait_command_done_or_stop(
                     self.dobot,
                     move_result,

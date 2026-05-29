@@ -46,3 +46,10 @@ CIRCLE_RX_DEG = 180
 # applies physical probe rotation by offsetting the tool-frame Rz instead.
 CIRCLE_RZ_DEG = 0
 CIRCLE_PROBE_ANGLE_DEG = 0
+
+# Lateral sidestep along user Y applied before entering the scan start pose
+# and before returning to the circle-center pose. The robot translates by this
+# many mm first (predictable linear motion), then MovJs to the target so the
+# rotation does not pass through obstacles (e.g. the subject's fingers) sitting
+# along the original Y position. Sign chooses which side to step toward.
+CIRCLE_APPROACH_OFFSET_MM = 50

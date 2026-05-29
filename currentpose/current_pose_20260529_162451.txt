@@ -1,0 +1,18 @@
+Circular move current pose report
+Start time: 2026-05-29T16:24:51
+TOOL_INDEX: 1
+TOOL_FRAME: {-0.444257,-0.560915,220.3881648,0,0,-92}
+CIRCLE_TOOL_INDEX: 2
+Circle center tool frame: {-0.444257,-0.560915,255.3881648,0.0,0.0,-92.0}
+SUBCUTANEOUS_SCAN_DISTANCE_MM: 15.0
+CIRCLE_RADIUS_MM: 35.0
+Radius move delta along user Z: 20.0
+CIRCLE_ARC_DEG: 120.0
+CIRCLE_TOTAL_STEPS: 18
+Reported current pose frame: user=0, tool=1, tool_frame={-0.444257,-0.560915,220.3881648,0,0,-92}
+
+2026-05-29T16:25:04 | real_tool_start_pose | current_pose=[-602.3125, 47.9416, 137.625, -179.9983, -0.0104, 0.0] | target_pose=[-602.3125, 47.9416, 137.625, -179.9983, -0.0104, 0.0]
+2026-05-29T16:25:07 | radius_adjusted_pose | current_pose=[-602.3125, 47.9416, 157.625, 180.0, 0.0, 0.0] | target_pose=[-602.3125, 47.9416, 157.625, 180.0, 0.0, 0.0]
+2026-05-29T16:25:14 | start pose | current_pose=[-602.3125, 17.6307, 140.125, -120.0, 0.0, -0.0] | target_pose=[-602.3125, 47.9416, 122.625, -120.0, 0.0, 0.0]
+
+Finish time: 2026-05-29T16:25:20
