@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 import config
+import matrix_calculation
 
 from Dobot import get_robot_error, initialize_robot, stop_and_return
 from Laser import connect_laser
@@ -21,22 +22,19 @@ CURRENT_POSE_DIR = Path(__file__).with_name("currentpose")
 REPORT_POSE_USER_INDEX = 0
 
 
-def get_circle_center_tool_frame(tool_frame=None):
-    values = _tool_frame_values(tool_frame or config.TOOL_FRAME)
-    if len(values) != 6:
-        raise ValueError("TOOL_FRAME must have 6 values: x, y, z, rx, ry, rz")
-
-    values[2] += config.CIRCLE_RADIUS_MM
-    return _format_tool_frame(values)
-
-
-def get_probe_angle_tool_frame(tool_frame, angle_deg):
-    values = _tool_frame_values(tool_frame)
-    if len(values) != 6:
-        raise ValueError("TOOL_FRAME must have 6 values: x, y, z, rx, ry, rz")
-
-    values[5] -= angle_deg
-    return _format_tool_frame(values)
+def calculate_matrix_circle_center_pose(radius_pose):
+    center_position = matrix_calculation.offset_position_from_pose(
+        radius_pose,
+        [0, 0, config.CIRCLE_RADIUS_MM],
+    )
+    return [
+        center_position[0],
+        center_position[1],
+        center_position[2],
+        radius_pose[3],
+        radius_pose[4],
+        radius_pose[5],
+    ]
 
 
 def create_current_pose_report(start_time):
@@ -49,8 +47,8 @@ def create_current_pose_report(start_time):
         file.write(f"Start time: {start_time.isoformat(timespec='seconds')}\n")
         file.write(f"TOOL_INDEX: {config.TOOL_INDEX}\n")
         file.write(f"TOOL_FRAME: {config.TOOL_FRAME}\n")
-        file.write(f"CIRCLE_TOOL_INDEX: {config.CIRCLE_TOOL_INDEX}\n")
-        file.write(f"Circle center tool frame: {get_circle_center_tool_frame()}\n")
+        file.write("Circle center mode: matrix calculation from real tool pose\n")
+        file.write("Circle center offset in real tool frame: {0,0,CIRCLE_RADIUS_MM}\n")
         file.write(f"SUBCUTANEOUS_SCAN_DISTANCE_MM: {config.SUBCUTANEOUS_SCAN_DISTANCE_MM}\n")
         file.write(f"CIRCLE_RADIUS_MM: {config.CIRCLE_RADIUS_MM}\n")
         file.write(
@@ -77,59 +75,25 @@ def get_config_tool_cartesian_pose(dobot):
         tool=config.TOOL_INDEX,
     )
     print(f"GetPose(user={REPORT_POSE_USER_INDEX}, tool={config.TOOL_INDEX}):", recv)
+    return _pose_from_get_pose(recv)
+
+
+def _pose_from_get_pose(recv):
     values = [float(num) for num in re.findall(r"-?\d+(?:\.\d+)?", recv)]
-    if len(values) >= 7 and int(values[0]) == 0:
-        return values[1:7]
-    if len(values) >= 6:
-        return values[:6]
-    raise ValueError(f"GetPose(user={REPORT_POSE_USER_INDEX}, tool={config.TOOL_INDEX}) failed: " + recv)
-
-
-def report_current_pose(dobot, report_path, label, target_pose=None):
-    current_pose = get_config_tool_cartesian_pose(dobot)
-    line = f"{datetime.now().isoformat(timespec='seconds')} | {label} | current_pose={current_pose}"
-    if target_pose is not None:
-        line += f" | target_pose={target_pose}"
-
-    print(line)
-    with report_path.open("a", encoding="utf-8") as file:
-        file.write(line + "\n")
-
-    return current_pose
-
-
-def get_circle_tool_cartesian_pose(dobot):
-    recv = dobot.dashboard.GetPose(
-        user=config.CIRCLE_USER_INDEX,
-        tool=config.CIRCLE_TOOL_INDEX,
-    )
-    print(f"GetPose(user={config.CIRCLE_USER_INDEX}, tool={config.CIRCLE_TOOL_INDEX}):", recv)
-    values = [float(num) for num in re.findall(r"-?\d+(?:\.\d+)?", recv)]
-    if len(values) >= 7 and int(values[0]) == 0:
-        return values[1:7]
-    if len(values) >= 6:
-        return values[:6]
-    raise ValueError(
-        f"GetPose(user={config.CIRCLE_USER_INDEX}, tool={config.CIRCLE_TOOL_INDEX}) failed: " + recv
-    )
+    if len(values) < 7 or int(values[0]) != 0:
+        raise ValueError("GetPose failed: " + recv)
+    return values[1:7]
 
 
 def level_xz_plane(dobot):
     # Set rx=180, ry=0 (keep x/y/z and rz) so the probe points straight down and
     # the circular scan starts from a level orientation. Operates in the
-    # configured tool frame (TOOL_INDEX), so the caller must have already
-    # SetTool/ActivateTool'd it (initialize_devices does this).
+    # configured tool frame (TOOL_INDEX), which run_experiment activates once.
     user = REPORT_POSE_USER_INDEX
     tool = config.TOOL_INDEX
     recv = dobot.dashboard.GetPose(user=user, tool=tool)
     print(f"GetPose(user={user}, tool={tool}):", recv)
-    values = [float(num) for num in re.findall(r"-?\d+(?:\.\d+)?", recv)]
-    if len(values) >= 7 and int(values[0]) == 0:
-        pose = values[1:7]
-    elif len(values) >= 6:
-        pose = values[:6]
-    else:
-        raise ValueError(f"GetPose(user={user}, tool={tool}) failed: " + recv)
+    pose = _pose_from_get_pose(recv)
 
     pose[3] = 180.0
     pose[4] = 0.0
@@ -148,10 +112,7 @@ def level_xz_plane(dobot):
     return pose
 
 
-def initialize_devices(report_path, tool_frame=None):
-    # Step 1: connect laser + robot, activate the configured tool, and record
-    # the real tool start pose. Leveling (rx=180, ry=0) is a separate manual
-    # step via level_xz_plane().
+def initialize_devices():
     laser = connect_laser(config.LASER_DLL_PATH)
     try:
         laser.initialize_laser(config.LASER_WAVELENGTH_NM)
@@ -159,13 +120,6 @@ def initialize_devices(report_path, tool_frame=None):
             config.DOBOT_IP,
             config.SPEED_RATIO,
         )
-
-        active_tool_frame = tool_frame or config.TOOL_FRAME
-        dobot.SetTool(config.TOOL_INDEX, active_tool_frame)
-        dobot.ActivateTool(config.TOOL_INDEX)
-        real_start_pose = get_config_tool_cartesian_pose(dobot)
-        print("Real tool start pose:", real_start_pose)
-        report_current_pose(dobot, report_path, "real_tool_start_pose", real_start_pose)
     except Exception:
         # Release the laser so the next attempt doesn't see "already connected" (err 17).
         try:
@@ -173,19 +127,16 @@ def initialize_devices(report_path, tool_frame=None):
         except Exception:
             pass
         raise
-    return laser, dobot, feed_thread, real_start_pose
+    return laser, dobot, feed_thread
 
 
-def set_radius(dobot, report_path, tool_frame=None):
-    # Step 2: move the arm by the radius delta, then build the virtual
-    # circle-center tool frame and read the circle center pose.
-    active_tool_frame = tool_frame or config.TOOL_FRAME
+def set_radius(dobot, report_path):
+    # Step 2: move the real tool by the radius delta, then calculate the circle
+    # center from the real tool pose. No virtual circle-center tool is created.
     radius_delta = config.CIRCLE_RADIUS_MM - config.SUBCUTANEOUS_SCAN_DISTANCE_MM
     if abs(radius_delta) < 1e-9:
         print("Radius move skipped: radius already matches subcutaneous distance")
     else:
-        dobot.SetTool(config.TOOL_INDEX, active_tool_frame)
-        dobot.ActivateTool(config.TOOL_INDEX)
         move_result = dobot.dashboard.RelMovLUser(
             0,
             0,
@@ -203,42 +154,17 @@ def set_radius(dobot, report_path, tool_frame=None):
 
     radius_pose = get_config_tool_cartesian_pose(dobot)
     print("Radius-adjusted real tool pose:", radius_pose)
-    report_current_pose(dobot, report_path, "radius_adjusted_pose", radius_pose)
+    line = (
+        f"{datetime.now().isoformat(timespec='seconds')} | "
+        f"radius_adjusted_pose | current_pose={radius_pose}"
+    )
+    print(line)
+    with report_path.open("a", encoding="utf-8") as file:
+        file.write(line + "\n")
 
-    circle_tool_frame = get_circle_center_tool_frame(active_tool_frame)
-    dobot.SetTool(config.CIRCLE_TOOL_INDEX, circle_tool_frame)
-    dobot.ActivateTool(config.CIRCLE_TOOL_INDEX)
-    center_pose = get_circle_tool_cartesian_pose(dobot)
-    print("Circle center pose:", center_pose)
-    return radius_pose, center_pose, circle_tool_frame
-
-
-def initialize(report_path):
-    laser, dobot, feed_thread, real_start_pose = initialize_devices(report_path)
-    try:
-        config.CIRCLE_RZ_DEG = real_start_pose[5]
-        print("Default scan Rz from real_start_pose:", config.CIRCLE_RZ_DEG)
-        level_xz_plane(dobot)
-        radius_pose, center_pose, circle_tool_frame = set_radius(dobot, report_path)
-    except Exception:
-        try:
-            laser.close()
-        except Exception:
-            pass
-        raise
-    return laser, dobot, feed_thread, real_start_pose, radius_pose, center_pose, circle_tool_frame
-
-
-def _tool_frame_values(tool_frame):
-    return [
-        float(value.strip())
-        for value in tool_frame.strip("{}").split(",")
-        if value.strip()
-    ]
-
-
-def _format_tool_frame(values):
-    return "{" + ",".join(str(value) for value in values) + "}"
+    center_pose = calculate_matrix_circle_center_pose(radius_pose)
+    print("Matrix circle center pose:", center_pose)
+    return radius_pose, center_pose
 
 
 def run_step(
@@ -249,13 +175,10 @@ def run_step(
     acceleration,
     velocity,
     cp,
-    circle_tool_frame,
     stop_event=None,
     trigger_do_index=None,
     trigger_pulse_seconds=None,
 ):
-    dobot.SetTool(tool, circle_tool_frame)
-    dobot.ActivateTool(tool)
     move_result = dobot.dashboard.MovJ(
         *pose,
         0,
@@ -379,30 +302,20 @@ def ask_circle_approach_offset():
     return offset
 
 
-def generate_tool_center_circle_poses(
+def generate_matrix_circle_poses(
     center_pose,
     total_steps,
     arc_deg,
+    start_pose,
+    axis="rx",
 ):
-    center_x = center_pose[0]
-    center_y = center_pose[1]
-    center_z = center_pose[2]
-    center_rx = center_pose[3]
-    center_ry = center_pose[4]
-    center_rz = center_pose[5]
-
-    poses = []
-    start_offset = arc_deg / 2
-    angle_step = arc_deg / total_steps
-
-    for step_index in range(total_steps + 1):
-        rx = center_rx + start_offset - step_index * angle_step
-        # Wrap into (-180, 180]: rx=-186.67 -> 173.33 etc. Same physical
-        # orientation, but stays in the Euler range the controller accepts.
-        rx = ((rx + 180.0) % 360.0) - 180.0
-        poses.append([center_x, center_y, center_z, rx, center_ry, center_rz])
-
-    return poses
+    return matrix_calculation.generate_real_tool_circle_poses(
+        start_pose,
+        center_pose[:3],
+        total_steps=total_steps,
+        arc_deg=arc_deg,
+        axis=axis,
+    )
 
 
 def run_experiment():
@@ -413,43 +326,54 @@ def run_experiment():
 
     start_time = datetime.now()
     report_path = create_current_pose_report(start_time)
-    (
-        laser,
-        dobot,
-        feed_thread,
-        real_start_pose,
-        radius_pose,
-        center_pose,
-        circle_tool_frame,
-    ) = initialize(report_path)
+    laser, dobot, feed_thread = initialize_devices()
 
     user = config.CIRCLE_USER_INDEX
-    tool = config.CIRCLE_TOOL_INDEX
+    tool = config.TOOL_INDEX
     acceleration = config.CIRCLE_ACCELERATION_RATIO
     velocity = config.CIRCLE_VELOCITY_RATIO
     cp = config.CIRCLE_CP
 
-    # Use the Rz remembered after initialization so the scan starts from the
-    # active tool-frame orientation unless the operator changes it later.
-    center_pose = list(center_pose)
-    center_pose[5] = config.CIRCLE_RZ_DEG
-    radius_pose = list(radius_pose)
-    radius_pose[5] = config.CIRCLE_RZ_DEG
+    try:
+        dobot.SetTool(tool, config.TOOL_FRAME)
+        dobot.ActivateTool(tool)
 
-    poses = generate_tool_center_circle_poses(
+        real_start_pose = get_config_tool_cartesian_pose(dobot)
+        print("Real tool start pose:", real_start_pose)
+        line = (
+            f"{datetime.now().isoformat(timespec='seconds')} | "
+            f"real_tool_start_pose | current_pose={real_start_pose}"
+        )
+        print(line)
+        with report_path.open("a", encoding="utf-8") as file:
+            file.write(line + "\n")
+
+        level_xz_plane(dobot)
+        radius_pose, center_pose = set_radius(dobot, report_path)
+    except Exception:
+        try:
+            laser.close()
+        except Exception:
+            pass
+        raise
+
+    center_pose = list(center_pose)
+    radius_pose = list(radius_pose)
+
+    poses = generate_matrix_circle_poses(
         center_pose,
         total_steps=total_steps,
         arc_deg=config.CIRCLE_ARC_DEG,
+        start_pose=radius_pose,
+        axis=getattr(config, "CIRCLE_ROTATION_AXIS", "rx"),
     )
 
     try:
         if get_robot_error(dobot):
-            stop_and_return(dobot, center_pose, config.SPEED_RATIO)
+            stop_and_return(dobot, radius_pose, config.SPEED_RATIO)
             return laser, dobot, feed_thread, real_start_pose, poses
 
         start_pose = poses[0]
-        dobot.SetTool(tool, circle_tool_frame)
-        dobot.ActivateTool(tool)
 
         # Step 1: linear sidestep along user Y so the subsequent rotation
         # passes through clear space, not over the subject.
@@ -482,11 +406,18 @@ def run_experiment():
             print(f"DO({config.TRIGGER_DO_INDEX},1,{pulse_ms}ms):", do_result)
         if not dobot.WaitCommandDone(move_result):
             raise RuntimeError("Move to start pose failed or timed out")
-        report_current_pose(dobot, report_path, "start pose", start_pose)
+        current_pose = get_config_tool_cartesian_pose(dobot)
+        line = (
+            f"{datetime.now().isoformat(timespec='seconds')} | "
+            f"start pose | current_pose={current_pose} | target_pose={start_pose}"
+        )
+        print(line)
+        with report_path.open("a", encoding="utf-8") as file:
+            file.write(line + "\n")
 
         for index, pose in enumerate(poses[1:], start=2):
             if get_robot_error(dobot):
-                stop_and_return(dobot, center_pose, config.SPEED_RATIO)
+                stop_and_return(dobot, radius_pose, config.SPEED_RATIO)
                 return laser, dobot, feed_thread, real_start_pose, poses
 
             print(f"Circle point {index}/{len(poses)}:", pose)
@@ -498,15 +429,18 @@ def run_experiment():
                 acceleration=acceleration,
                 velocity=velocity,
                 cp=cp,
-                circle_tool_frame=circle_tool_frame,
                 trigger_do_index=config.TRIGGER_DO_INDEX,
                 trigger_pulse_seconds=config.TRIGGER_PULSE_SECONDS,
             )
-            report_current_pose(dobot, report_path, f"circle point {index}/{len(poses)}", pose)
-
-        dobot.SetTool(tool, circle_tool_frame)
-        dobot.ActivateTool(tool)
-
+            current_pose = get_config_tool_cartesian_pose(dobot)
+            line = (
+                f"{datetime.now().isoformat(timespec='seconds')} | "
+                f"circle point {index}/{len(poses)} | "
+                f"current_pose={current_pose} | target_pose={pose}"
+            )
+            print(line)
+            with report_path.open("a", encoding="utf-8") as file:
+                file.write(line + "\n")
         # Same approach as entering start: sidestep Y first, then MovJ.
         print(f"Sidestep Y by {config.CIRCLE_APPROACH_OFFSET_MM} mm")
         sidestep_result = dobot.dashboard.RelMovLUser(
@@ -519,9 +453,9 @@ def run_experiment():
         if not dobot.WaitCommandDone(sidestep_result):
             raise RuntimeError("Sidestep before center pose failed or timed out")
 
-        print("Move back to circle center pose:", center_pose)
+        print("Move back to radius-adjusted real tool pose:", radius_pose)
         move_result = dobot.dashboard.MovJ(
-            *center_pose,
+            *radius_pose,
             0,
             user=user,
             tool=tool,
@@ -531,8 +465,16 @@ def run_experiment():
         )
         print("MovJ back to center:", move_result)
         if not dobot.WaitCommandDone(move_result):
-            raise RuntimeError("Move back to circle center pose failed or timed out")
-        report_current_pose(dobot, report_path, "return radius_adjusted_pose", radius_pose)
+            raise RuntimeError("Move back to radius-adjusted pose failed or timed out")
+        current_pose = get_config_tool_cartesian_pose(dobot)
+        line = (
+            f"{datetime.now().isoformat(timespec='seconds')} | "
+            "return radius_adjusted_pose | "
+            f"current_pose={current_pose} | target_pose={radius_pose}"
+        )
+        print(line)
+        with report_path.open("a", encoding="utf-8") as file:
+            file.write(line + "\n")
 
     finally:
         with report_path.open("a", encoding="utf-8") as file:

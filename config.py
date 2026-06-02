@@ -27,12 +27,12 @@ TOOL_INDEX = 1
 TOOL_FRAME = "{1.34,3.09056,218.6788,0,0,86}"
 
 # Circular move.
-CIRCLE_TOOL_INDEX = 2
 CIRCLE_USER_INDEX = 0
 CIRCLE_ACCELERATION_RATIO = 20
 CIRCLE_VELOCITY_RATIO = 20
 CIRCLE_CP = 100
 CIRCLE_INITIAL_POSE = None
+CIRCLE_ROTATION_AXIS = "rx"
 
 # The circle center is first defined SUBCUTANEOUS_SCAN_DISTANCE_MM below the
 # current probe/tool end along user Z. CIRCLE_RADIUS_MM then sets the final
@@ -42,10 +42,6 @@ CIRCLE_RADIUS_MM = 350
 CIRCLE_ARC_DEG = 120
 CIRCLE_TOTAL_STEPS = 18
 CIRCLE_RX_DEG = 180
-# Robot target Rz for compensated probe rotation. The GUI keeps this at 0 and
-# applies physical probe rotation by offsetting the tool-frame Rz instead.
-CIRCLE_RZ_DEG = 0
-CIRCLE_PROBE_ANGLE_DEG = 0
 
 # Lateral sidestep along user Y applied before entering the scan start pose
 # and before returning to the circle-center pose. The robot translates by this
