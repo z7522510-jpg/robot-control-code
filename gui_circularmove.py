@@ -36,14 +36,12 @@ class CircularMoveGui(tk.Tk):
         self.real_start_pose = None
         self.radius_pose = None
         self.center_pose = None
-        self.effective_tool_frame = config.TOOL_FRAME
         self.poses = []
 
         self._busy = False
         self.settings = self.load_settings()
         self.inputs = {}
         self.tool_frame_var = tk.StringVar(value=config.TOOL_FRAME)
-        self.effective_tool_frame_var = tk.StringVar(value="Not prepared")
         self.center_pose_var = tk.StringVar(value="Not prepared")
         self.progress_var = tk.StringVar(value="0/0")
 
@@ -120,8 +118,7 @@ class CircularMoveGui(tk.Tk):
         status.columnconfigure(1, weight=1)
 
         status_rows = [
-            ("Base Tool Frame", self.tool_frame_var),
-            ("Effective Tool Frame", self.effective_tool_frame_var),
+            ("Tool Frame", self.tool_frame_var),
             ("Matrix Circle Center", self.center_pose_var),
             ("Progress", self.progress_var),
         ]
@@ -170,7 +167,6 @@ class CircularMoveGui(tk.Tk):
         config.TRIGGER_PULSE_SECONDS = float(values["TRIGGER_PULSE_SECONDS"])
         config.CIRCLE_APPROACH_OFFSET_MM = float(values["CIRCLE_APPROACH_OFFSET_MM"])
         config.TOOL_FRAME = values["TOOL_FRAME"]
-        self.effective_tool_frame = config.TOOL_FRAME
 
         if config.CIRCLE_RADIUS_MM <= 0:
             raise ValueError("Radius mm must be greater than 0")
@@ -190,25 +186,25 @@ class CircularMoveGui(tk.Tk):
             raise ValueError("Trigger DO Index must be greater than 0")
         if config.TRIGGER_PULSE_SECONDS <= 0:
             raise ValueError("Trigger Pulse Seconds must be greater than 0")
-        if len(circularmove._tool_frame_values(config.TOOL_FRAME)) != 6:
+        tool_frame_values = [
+            value.strip()
+            for value in config.TOOL_FRAME.strip("{}").split(",")
+            if value.strip()
+        ]
+        if len(tool_frame_values) != 6:
             raise ValueError("Tool Frame must have 6 values")
+        for value in tool_frame_values:
+            float(value)
 
         self.save_settings()
         self.update_static_status()
 
     def update_static_status(self):
-        base_tool_frame = config.TOOL_FRAME
+        tool_frame = config.TOOL_FRAME
         if "TOOL_FRAME" in self.inputs:
-            base_tool_frame = self.inputs["TOOL_FRAME"].get().strip() or config.TOOL_FRAME
+            tool_frame = self.inputs["TOOL_FRAME"].get().strip() or config.TOOL_FRAME
 
-        self.tool_frame_var.set(base_tool_frame)
-        try:
-            circularmove._tool_frame_values(base_tool_frame)
-            self.effective_tool_frame = base_tool_frame
-
-            self.effective_tool_frame_var.set(self.effective_tool_frame)
-        except Exception:
-            self.effective_tool_frame_var.set("Invalid tool frame")
+        self.tool_frame_var.set(tool_frame)
 
     def initialize_devices(self):
         if self.worker and self.worker.is_alive():
@@ -231,15 +227,18 @@ class CircularMoveGui(tk.Tk):
             with contextlib.redirect_stdout(self):
                 start_time = datetime.now()
                 self.report_path = circularmove.create_current_pose_report(start_time)
-                (
-                    self.laser,
-                    self.dobot,
-                    self.feed_thread,
-                    self.real_start_pose,
-                ) = circularmove.initialize_devices(
-                    self.report_path,
-                    tool_frame=self.effective_tool_frame,
+                self.laser, self.dobot, self.feed_thread = circularmove.initialize_devices()
+                self.dobot.SetTool(config.TOOL_INDEX, config.TOOL_FRAME)
+                self.dobot.ActivateTool(config.TOOL_INDEX)
+                self.real_start_pose = circularmove.get_config_tool_cartesian_pose(self.dobot)
+                print("Real tool start pose:", self.real_start_pose)
+                line = (
+                    f"{datetime.now().isoformat(timespec='seconds')} | "
+                    f"real_tool_start_pose | current_pose={self.real_start_pose}"
                 )
+                print(line)
+                with self.report_path.open("a", encoding="utf-8") as file:
+                    file.write(line + "\n")
                 self.devices_ready = True
                 print("Devices initialized. Press Set Radius to move the arm.")
         except Exception as error:
@@ -270,11 +269,7 @@ class CircularMoveGui(tk.Tk):
                 (
                     self.radius_pose,
                     self.center_pose,
-                ) = circularmove.set_radius(
-                    self.dobot,
-                    self.report_path,
-                    tool_frame=self.effective_tool_frame,
-                )
+                ) = circularmove.set_radius(self.dobot, self.report_path)
 
                 self.center_pose = list(self.center_pose)
                 self.radius_pose = list(self.radius_pose)
@@ -326,9 +321,6 @@ class CircularMoveGui(tk.Tk):
 
         # Re-read inputs so runtime tweaks (approach offset, trigger, speed
         # ratios, etc.) take effect without re-running Initialize / Set Radius.
-        # Note: changing TOOL_FRAME / radius here does not re-define the tool
-        # frame on the controller or regenerate poses — those require redoing
-        # Initialize / Set Radius.
         try:
             self.read_parameters()
         except Exception as error:
@@ -354,10 +346,8 @@ class CircularMoveGui(tk.Tk):
                     return
 
                 start_pose = self.poses[0]
-                self.dobot.SetTool(config.TOOL_INDEX, self.effective_tool_frame)
-                self.dobot.ActivateTool(config.TOOL_INDEX)
 
-                # Step 1: linear sidestep along user X so the subsequent
+                # Step 1: linear sidestep along user Y so the subsequent
                 # rotation passes through clear space, not over the subject.
                 print(f"Sidestep Y by -{config.CIRCLE_APPROACH_OFFSET_MM} mm")
                 sidestep_result = self.dobot.dashboard.RelMovLUser(
@@ -396,7 +386,14 @@ class CircularMoveGui(tk.Tk):
                     self.stop_event,
                 ):
                     raise RuntimeError("Move circular to start pose failed or timed out")
-                circularmove.report_current_pose(self.dobot, self.report_path, "start pose", start_pose)
+                current_pose = circularmove.get_config_tool_cartesian_pose(self.dobot)
+                line = (
+                    f"{datetime.now().isoformat(timespec='seconds')} | "
+                    f"start pose | current_pose={current_pose} | target_pose={start_pose}"
+                )
+                print(line)
+                with self.report_path.open("a", encoding="utf-8") as file:
+                    file.write(line + "\n")
                 self.queue_status("progress", f"1/{total}")
 
                 for index, pose in enumerate(self.poses[1:], start=2):
@@ -415,23 +412,22 @@ class CircularMoveGui(tk.Tk):
                         acceleration=config.CIRCLE_ACCELERATION_RATIO,
                         velocity=config.CIRCLE_VELOCITY_RATIO,
                         cp=config.CIRCLE_CP,
-                        tool_frame=self.effective_tool_frame,
                         stop_event=self.stop_event,
                         trigger_do_index=config.TRIGGER_DO_INDEX,
                         trigger_pulse_seconds=config.TRIGGER_PULSE_SECONDS,
                     )
-                    circularmove.report_current_pose(
-                        self.dobot,
-                        self.report_path,
-                        f"circle point {index}/{total}",
-                        pose,
+                    current_pose = circularmove.get_config_tool_cartesian_pose(self.dobot)
+                    line = (
+                        f"{datetime.now().isoformat(timespec='seconds')} | "
+                        f"circle point {index}/{total} | "
+                        f"current_pose={current_pose} | target_pose={pose}"
                     )
+                    print(line)
+                    with self.report_path.open("a", encoding="utf-8") as file:
+                        file.write(line + "\n")
                     self.queue_status("progress", f"{index}/{total}")
 
-                self.dobot.SetTool(config.TOOL_INDEX, self.effective_tool_frame)
-                self.dobot.ActivateTool(config.TOOL_INDEX)
-
-                # Same approach as entering start: sidestep X first, then MovJ.
+                # Same approach as entering start: sidestep Y first, then MovJ.
                 print(f"Sidestep Y by {config.CIRCLE_APPROACH_OFFSET_MM} mm")
                 sidestep_result = self.dobot.dashboard.RelMovLUser(
                     0, config.CIRCLE_APPROACH_OFFSET_MM, 0, 0, 0, 0,
@@ -465,12 +461,15 @@ class CircularMoveGui(tk.Tk):
                 ):
                     raise RuntimeError("Move back to radius-adjusted pose failed or timed out")
                 self.radius_returned = True
-                circularmove.report_current_pose(
-                    self.dobot,
-                    self.report_path,
-                    "return radius_adjusted_pose",
-                    self.radius_pose,
+                current_pose = circularmove.get_config_tool_cartesian_pose(self.dobot)
+                line = (
+                    f"{datetime.now().isoformat(timespec='seconds')} | "
+                    "return radius_adjusted_pose | "
+                    f"current_pose={current_pose} | target_pose={self.radius_pose}"
                 )
+                print(line)
+                with self.report_path.open("a", encoding="utf-8") as file:
+                    file.write(line + "\n")
         except Exception as error:
             if self.stop_event.is_set():
                 self.log(f"Scan stopped: {error}")
@@ -497,8 +496,6 @@ class CircularMoveGui(tk.Tk):
             return
 
         print("Return to radius-adjusted vertical pose:", self.radius_pose)
-        # MovJ names user/tool explicitly below, so only define the frame here.
-        self.dobot.SetTool(config.TOOL_INDEX, self.effective_tool_frame)
         move_result = self.dobot.dashboard.MovJ(
             *self.radius_pose,
             0,
