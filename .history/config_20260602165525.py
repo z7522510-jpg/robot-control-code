@@ -49,10 +49,3 @@ CIRCLE_RX_DEG = 180
 # rotation does not pass through obstacles (e.g. the subject's fingers) sitting
 # along the original Y position. Sign chooses which side to step toward.
 CIRCLE_APPROACH_OFFSET_MM = 50
-
-# Direction (+1 or -1) applied to CIRCLE_APPROACH_OFFSET_MM for each of the two
-# sidesteps independently: the first sidestep before entering the start pose,
-# and the second sidestep before returning. +1 steps forward along the offset
-# axis, -1 steps backward.
-CIRCLE_APPROACH_OFFSET_SIGN_FIRST = -1
-CIRCLE_APPROACH_OFFSET_SIGN_SECOND = 1

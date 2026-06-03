@@ -42,6 +42,23 @@ class CircularMoveGui(tk.Tk):
         self.settings = self.load_settings()
         self.inputs = {}
         self.tool_frame_var = tk.StringVar(value=config.TOOL_FRAME)
+        self.rotation_axis_var = tk.StringVar(
+            value=self.settings.get(
+                "CIRCLE_ROTATION_AXIS", getattr(config, "CIRCLE_ROTATION_AXIS", "rx")
+            )
+        )
+        self.offset_sign_first_var = tk.StringVar(
+            value=self.settings.get(
+                "CIRCLE_APPROACH_OFFSET_SIGN_FIRST",
+                "+" if getattr(config, "CIRCLE_APPROACH_OFFSET_SIGN_FIRST", -1) >= 0 else "-",
+            )
+        )
+        self.offset_sign_second_var = tk.StringVar(
+            value=self.settings.get(
+                "CIRCLE_APPROACH_OFFSET_SIGN_SECOND",
+                "+" if getattr(config, "CIRCLE_APPROACH_OFFSET_SIGN_SECOND", 1) >= 0 else "-",
+            )
+        )
         self.center_pose_var = tk.StringVar(value="Not prepared")
         self.progress_var = tk.StringVar(value="0/0")
 
@@ -96,6 +113,43 @@ class CircularMoveGui(tk.Tk):
                 entry.bind("<KeyRelease>", lambda _event: self.update_static_status())
                 entry.bind("<FocusOut>", lambda _event: self.update_static_status())
 
+        axis_row = len(fields)
+        ttk.Label(params, text="Rotation Axis").grid(row=axis_row, column=0, sticky="w", pady=4)
+        axis_combo = ttk.Combobox(
+            params,
+            textvariable=self.rotation_axis_var,
+            values=["rx", "ry"],
+            state="readonly",
+            width=31,
+        )
+        axis_combo.grid(row=axis_row, column=1, sticky="ew", pady=4)
+
+        first_sign_row = axis_row + 1
+        ttk.Label(params, text="First Offset Direction").grid(
+            row=first_sign_row, column=0, sticky="w", pady=4
+        )
+        first_sign_combo = ttk.Combobox(
+            params,
+            textvariable=self.offset_sign_first_var,
+            values=["+", "-"],
+            state="readonly",
+            width=31,
+        )
+        first_sign_combo.grid(row=first_sign_row, column=1, sticky="ew", pady=4)
+
+        second_sign_row = axis_row + 2
+        ttk.Label(params, text="Second Offset Direction").grid(
+            row=second_sign_row, column=0, sticky="w", pady=4
+        )
+        second_sign_combo = ttk.Combobox(
+            params,
+            textvariable=self.offset_sign_second_var,
+            values=["+", "-"],
+            state="readonly",
+            width=31,
+        )
+        second_sign_combo.grid(row=second_sign_row, column=1, sticky="ew", pady=4)
+
         params.columnconfigure(1, weight=1)
 
         buttons = ttk.Frame(left)
@@ -149,6 +203,9 @@ class CircularMoveGui(tk.Tk):
 
     def save_settings(self):
         settings = {key: entry.get() for key, entry in self.inputs.items()}
+        settings["CIRCLE_ROTATION_AXIS"] = self.rotation_axis_var.get()
+        settings["CIRCLE_APPROACH_OFFSET_SIGN_FIRST"] = self.offset_sign_first_var.get()
+        settings["CIRCLE_APPROACH_OFFSET_SIGN_SECOND"] = self.offset_sign_second_var.get()
         with SETTINGS_PATH.open("w", encoding="utf-8") as file:
             json.dump(settings, file, indent=2)
 
@@ -167,6 +224,18 @@ class CircularMoveGui(tk.Tk):
         config.TRIGGER_PULSE_SECONDS = float(values["TRIGGER_PULSE_SECONDS"])
         config.CIRCLE_APPROACH_OFFSET_MM = float(values["CIRCLE_APPROACH_OFFSET_MM"])
         config.TOOL_FRAME = values["TOOL_FRAME"]
+
+        axis_value = self.rotation_axis_var.get().strip().lower()
+        if axis_value not in ("rx", "ry"):
+            raise ValueError("Rotation Axis must be rx or ry")
+        config.CIRCLE_ROTATION_AXIS = axis_value
+
+        config.CIRCLE_APPROACH_OFFSET_SIGN_FIRST = (
+            -1 if self.offset_sign_first_var.get().strip() == "-" else 1
+        )
+        config.CIRCLE_APPROACH_OFFSET_SIGN_SECOND = (
+            -1 if self.offset_sign_second_var.get().strip() == "-" else 1
+        )
 
         if config.CIRCLE_RADIUS_MM <= 0:
             raise ValueError("Radius mm must be greater than 0")
@@ -347,11 +416,28 @@ class CircularMoveGui(tk.Tk):
 
                 start_pose = self.poses[0]
 
-                # Step 1: linear sidestep along user Y so the subsequent
-                # rotation passes through clear space, not over the subject.
-                print(f"Sidestep Y by -{config.CIRCLE_APPROACH_OFFSET_MM} mm")
+                # The sidestep is perpendicular to the rotation plane: an rx
+                # rotation sweeps in the user Y/Z plane, so we step along user Y;
+                # an ry rotation sweeps in the user X/Z plane, so we step along
+                # user X. offset_axis is the RelMovLUser argument index (0=X, 1=Y).
+                rotation_axis = getattr(config, "CIRCLE_ROTATION_AXIS", "rx")
+                offset_axis = 0 if str(rotation_axis).strip().lower() == "ry" else 1
+                offset_label = "X" if offset_axis == 0 else "Y"
+
+                def sidestep_args(signed_offset):
+                    args = [0, 0, 0, 0, 0, 0]
+                    args[offset_axis] = signed_offset
+                    return args
+
+                # Step 1: linear sidestep perpendicular to the rotation plane so
+                # the subsequent rotation passes through clear space. The First
+                # Offset Direction sign chooses which side to step toward.
+                first_offset = (
+                    config.CIRCLE_APPROACH_OFFSET_SIGN_FIRST * config.CIRCLE_APPROACH_OFFSET_MM
+                )
+                print(f"Sidestep {offset_label} by {first_offset} mm")
                 sidestep_result = self.dobot.dashboard.RelMovLUser(
-                    0, -config.CIRCLE_APPROACH_OFFSET_MM, 0, 0, 0, 0,
+                    *sidestep_args(first_offset),
                     user=config.CIRCLE_USER_INDEX,
                     tool=config.TOOL_INDEX,
                     v=config.CIRCLE_VELOCITY_RATIO,
@@ -427,10 +513,14 @@ class CircularMoveGui(tk.Tk):
                         file.write(line + "\n")
                     self.queue_status("progress", f"{index}/{total}")
 
-                # Same approach as entering start: sidestep Y first, then MovJ.
-                print(f"Sidestep Y by {config.CIRCLE_APPROACH_OFFSET_MM} mm")
+                # Same approach as entering start: sidestep first, then MovJ.
+                # The Second Offset Direction sign chooses which side to step toward.
+                second_offset = (
+                    config.CIRCLE_APPROACH_OFFSET_SIGN_SECOND * config.CIRCLE_APPROACH_OFFSET_MM
+                )
+                print(f"Sidestep {offset_label} by {second_offset} mm")
                 sidestep_result = self.dobot.dashboard.RelMovLUser(
-                    0, config.CIRCLE_APPROACH_OFFSET_MM, 0, 0, 0, 0,
+                    *sidestep_args(second_offset),
                     user=config.CIRCLE_USER_INDEX,
                     tool=config.TOOL_INDEX,
                     v=config.CIRCLE_VELOCITY_RATIO,
