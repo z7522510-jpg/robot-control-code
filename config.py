@@ -42,6 +42,7 @@ CIRCLE_RADIUS_MM = 350
 CIRCLE_ARC_DEG = 120
 CIRCLE_TOTAL_STEPS = 18
 CIRCLE_RX_DEG = 180
+CIRCLE_RETURN_TO_SAVED_POINT = True
 
 # Lateral sidestep along user Y applied before entering the scan start pose
 # and before returning to the circle-center pose. The robot translates by this

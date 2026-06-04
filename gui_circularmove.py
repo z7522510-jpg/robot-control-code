@@ -59,6 +59,10 @@ class CircularMoveGui(tk.Tk):
                 "+" if getattr(config, "CIRCLE_APPROACH_OFFSET_SIGN_SECOND", 1) >= 0 else "-",
             )
         )
+        return_to_saved_point = self.settings.get("CIRCLE_RETURN_TO_SAVED_POINT", True)
+        self.return_to_saved_point_var = tk.BooleanVar(
+            value=return_to_saved_point not in (False, "False", "false", "0", 0)
+        )
         self.center_pose_var = tk.StringVar(value="Not prepared")
         self.progress_var = tk.StringVar(value="0/0")
 
@@ -150,6 +154,14 @@ class CircularMoveGui(tk.Tk):
         )
         second_sign_combo.grid(row=second_sign_row, column=1, sticky="ew", pady=4)
 
+        return_row = axis_row + 3
+        return_check = ttk.Checkbutton(
+            params,
+            text="Return to saved point after scan",
+            variable=self.return_to_saved_point_var,
+        )
+        return_check.grid(row=return_row, column=0, columnspan=2, sticky="w", pady=4)
+
         params.columnconfigure(1, weight=1)
 
         buttons = ttk.Frame(left)
@@ -206,6 +218,7 @@ class CircularMoveGui(tk.Tk):
         settings["CIRCLE_ROTATION_AXIS"] = self.rotation_axis_var.get()
         settings["CIRCLE_APPROACH_OFFSET_SIGN_FIRST"] = self.offset_sign_first_var.get()
         settings["CIRCLE_APPROACH_OFFSET_SIGN_SECOND"] = self.offset_sign_second_var.get()
+        settings["CIRCLE_RETURN_TO_SAVED_POINT"] = self.return_to_saved_point_var.get()
         with SETTINGS_PATH.open("w", encoding="utf-8") as file:
             json.dump(settings, file, indent=2)
 
@@ -236,6 +249,7 @@ class CircularMoveGui(tk.Tk):
         config.CIRCLE_APPROACH_OFFSET_SIGN_SECOND = (
             -1 if self.offset_sign_second_var.get().strip() == "-" else 1
         )
+        config.CIRCLE_RETURN_TO_SAVED_POINT = self.return_to_saved_point_var.get()
 
         if config.CIRCLE_RADIUS_MM <= 0:
             raise ValueError("Radius mm must be greater than 0")
@@ -513,53 +527,65 @@ class CircularMoveGui(tk.Tk):
                         file.write(line + "\n")
                     self.queue_status("progress", f"{index}/{total}")
 
-                # Same approach as entering start: sidestep first, then MovJ.
-                # The Second Offset Direction sign chooses which side to step toward.
-                second_offset = (
-                    config.CIRCLE_APPROACH_OFFSET_SIGN_SECOND * config.CIRCLE_APPROACH_OFFSET_MM
-                )
-                print(f"Sidestep {offset_label} by {second_offset} mm")
-                sidestep_result = self.dobot.dashboard.RelMovLUser(
-                    *sidestep_args(second_offset),
-                    user=config.CIRCLE_USER_INDEX,
-                    tool=config.TOOL_INDEX,
-                    v=config.CIRCLE_VELOCITY_RATIO,
-                )
-                print("Sidestep:", sidestep_result)
-                if not circularmove.wait_command_done_or_stop(
-                    self.dobot,
-                    sidestep_result,
-                    self.stop_event,
-                ):
-                    raise RuntimeError("Sidestep before center pose failed or timed out")
+                if getattr(config, "CIRCLE_RETURN_TO_SAVED_POINT", True):
+                    # Same approach as entering start: sidestep first, then MovJ.
+                    # The Second Offset Direction sign chooses which side to step toward.
+                    second_offset = (
+                        config.CIRCLE_APPROACH_OFFSET_SIGN_SECOND
+                        * config.CIRCLE_APPROACH_OFFSET_MM
+                    )
+                    print(f"Sidestep {offset_label} by {second_offset} mm")
+                    sidestep_result = self.dobot.dashboard.RelMovLUser(
+                        *sidestep_args(second_offset),
+                        user=config.CIRCLE_USER_INDEX,
+                        tool=config.TOOL_INDEX,
+                        v=config.CIRCLE_VELOCITY_RATIO,
+                    )
+                    print("Sidestep:", sidestep_result)
+                    if not circularmove.wait_command_done_or_stop(
+                        self.dobot,
+                        sidestep_result,
+                        self.stop_event,
+                    ):
+                        raise RuntimeError("Sidestep before center pose failed or timed out")
 
-                print("Move back to radius-adjusted real tool pose:", self.radius_pose)
-                move_result = self.dobot.dashboard.MovJ(
-                    *self.radius_pose,
-                    0,
-                    user=config.CIRCLE_USER_INDEX,
-                    tool=config.TOOL_INDEX,
-                    a=config.CIRCLE_ACCELERATION_RATIO,
-                    v=config.CIRCLE_VELOCITY_RATIO,
-                    cp=config.CIRCLE_CP,
-                )
-                print("MovJ back to center:", move_result)
-                if not circularmove.wait_command_done_or_stop(
-                    self.dobot,
-                    move_result,
-                    self.stop_event,
-                ):
-                    raise RuntimeError("Move back to radius-adjusted pose failed or timed out")
+                    print("Move back to radius-adjusted real tool pose:", self.radius_pose)
+                    move_result = self.dobot.dashboard.MovJ(
+                        *self.radius_pose,
+                        0,
+                        user=config.CIRCLE_USER_INDEX,
+                        tool=config.TOOL_INDEX,
+                        a=config.CIRCLE_ACCELERATION_RATIO,
+                        v=config.CIRCLE_VELOCITY_RATIO,
+                        cp=config.CIRCLE_CP,
+                    )
+                    print("MovJ back to center:", move_result)
+                    if not circularmove.wait_command_done_or_stop(
+                        self.dobot,
+                        move_result,
+                        self.stop_event,
+                    ):
+                        raise RuntimeError("Move back to radius-adjusted pose failed or timed out")
+                    current_pose = circularmove.get_config_tool_cartesian_pose(self.dobot)
+                    line = (
+                        f"{datetime.now().isoformat(timespec='seconds')} | "
+                        "return radius_adjusted_pose | "
+                        f"current_pose={current_pose} | target_pose={self.radius_pose}"
+                    )
+                    print(line)
+                    with self.report_path.open("a", encoding="utf-8") as file:
+                        file.write(line + "\n")
+                else:
+                    current_pose = circularmove.get_config_tool_cartesian_pose(self.dobot)
+                    line = (
+                        f"{datetime.now().isoformat(timespec='seconds')} | "
+                        f"finish without return | current_pose={current_pose}"
+                    )
+                    print(line)
+                    with self.report_path.open("a", encoding="utf-8") as file:
+                        file.write(line + "\n")
+
                 self.radius_returned = True
-                current_pose = circularmove.get_config_tool_cartesian_pose(self.dobot)
-                line = (
-                    f"{datetime.now().isoformat(timespec='seconds')} | "
-                    "return radius_adjusted_pose | "
-                    f"current_pose={current_pose} | target_pose={self.radius_pose}"
-                )
-                print(line)
-                with self.report_path.open("a", encoding="utf-8") as file:
-                    file.write(line + "\n")
         except Exception as error:
             if self.stop_event.is_set():
                 self.log(f"Scan stopped: {error}")
